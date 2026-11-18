@@ -236,7 +236,8 @@ async function step(org) {
     if (result && result.partial) await q("update jobs set status = 'queued', lease_until = null, updated_at = now() where id = $1", [job.id]);
     else await q("update jobs set status = 'done', lease_until = null, progress = progress || $2, updated_at = now() where id = $1", [job.id, { result }]);
   } catch (e) {
-    await q("update jobs set status = 'failed', lease_until = null, error = $2, updated_at = now() where id = $1", [job.id, String((e && (e.message || e.code)) || e).slice(0, 500)]);
+    const msg = e && e.code === 'billing' ? 'El análisis no pudo usar Claude: la cuenta de Anthropic de Tita no tiene saldo. Avísale al equipo de Tita.' : String((e && (e.message || e.code)) || e);
+    await q("update jobs set status = 'failed', lease_until = null, error = $2, updated_at = now() where id = $1", [job.id, msg.slice(0, 500)]);
     if (job.type === 'ingest' && job.params.sid) { const s = await store.get(job.org_id, 'stores', job.params.sid).catch(() => null); if (s) await store.put(job.org_id, 'stores', job.params.sid, { ...s, lastError: e.message, lastAttempt: new Date().toISOString() }, 'sistema').catch(() => {}); }
   }
   return job.id;

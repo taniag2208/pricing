@@ -281,7 +281,7 @@ app.post('/api/orgs/:org/ai/json', auth, orgAccess(2), wrap(async (req, res) => 
   if (!prompt || prompt.length > 250000) throw fail(400, 'prompt_too_large', 'Consulta vacía o demasiado larga.');
   const images = (req.body.images || []).slice(0, 3).filter((im) => /^image\/(png|jpeg|webp|gif)$/.test(im.media_type) && typeof im.data === 'string');
   try { res.json({ data: await ai.json(prompt, { tier: req.body.tier, images, orgId: req.params.org, userId: req.user.id, kind }) }); }
-  catch (e) { res.status(e.code === 'sampling_disabled' ? 503 : 502).json({ code: e.code || 'upstream_error', error: e.message }); }
+  catch (e) { res.status(e.code === 'sampling_disabled' || e.code === 'billing' ? 503 : 502).json({ code: e.code || 'upstream_error', error: e.message }); }
 }));
 app.post('/api/orgs/:org/ai/chat', auth, orgAccess(1), wrap(async (req, res) => {
   const lim = req.user.guest ? Number(process.env.GUEST_CHAT_PER_HOUR || 15) : Number(process.env.CHAT_PER_HOUR || 60);
@@ -291,7 +291,7 @@ app.post('/api/orgs/:org/ai/chat', auth, orgAccess(1), wrap(async (req, res) => 
   const tools = (Array.isArray(req.body.tools) ? req.body.tools : []).slice(0, 12).map((t) => ({ name: String(t.name).slice(0, 64), description: String(t.description || '').slice(0, 1024), input_schema: t.input_schema && typeof t.input_schema === 'object' ? t.input_schema : { type: 'object', properties: {} } }));
   if (!messages.length) throw fail(400, 'invalid', 'Sin mensajes.');
   try { const r = await ai.call({ messages, tools, tier: 'default', maxTokens: 8000, orgId: req.params.org, userId: req.user.id, kind: 'copilot' }); res.json({ content: r.content, stop_reason: r.stop_reason }); }
-  catch (e) { res.status(e.code === 'sampling_disabled' ? 503 : 502).json({ code: e.code || 'upstream_error', error: e.message }); }
+  catch (e) { res.status(e.code === 'sampling_disabled' || e.code === 'billing' ? 503 : 502).json({ code: e.code || 'upstream_error', error: e.message }); }
 }));
 
 /* ---------- archivos estáticos ---------- */

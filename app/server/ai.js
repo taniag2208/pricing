@@ -13,7 +13,10 @@ function mapError(e) {
   if (e && e.code) return e;
   if (e instanceof Anthropic.RateLimitError) return err('rate_limited', 'Límite de uso de la API alcanzado.');
   if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) return err('sampling_disabled', 'La API key de Anthropic no es válida o no tiene permisos.');
-  if (e instanceof Anthropic.BadRequestError) return err('invalid_request', e.message);
+  if (e instanceof Anthropic.BadRequestError) {
+    if (/credit balance/i.test(String(e.message))) return err('billing', 'La cuenta de Anthropic de Tita no tiene saldo. Hay que recargar créditos en console.anthropic.com (Billing).');
+    return err('invalid_request', 'Claude rechazó la consulta. Intenta de nuevo.');
+  }
   if (e instanceof Anthropic.APIError) return err('upstream_error', 'Error de la API (' + e.status + ').');
   return err('upstream_error', (e && e.message) || 'Error desconocido');
 }
