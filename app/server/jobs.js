@@ -10,7 +10,7 @@ const TP = require('./shared');
 const I = TP.ingest;
 
 const CHUNK = 150;
-const BATCH = Number(process.env.CLASSIFY_BATCH || 40);
+const BATCH = Number(process.env.CLASSIFY_BATCH || ((process.env.AI_PROVIDER || '').toLowerCase() === 'gateway' ? 20 : 40));
 const MAX_BATCHES = Number(process.env.CLASSIFY_MAX_BATCHES || 150);
 const CONCURRENCY = Number(process.env.JOB_CONCURRENCY || 2);
 

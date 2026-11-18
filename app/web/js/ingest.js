@@ -288,7 +288,8 @@
       const p = items[Number(o.k)]; if (!p) return;
       const c = cats.find((x) => x.id === o.cat);
       if (!c) { res[p.id] = { cat: null, conf: o.conf || 'media' }; return; }
-      const near = (v, list) => list.find((x) => strip(x) === strip(String(v || ''))) || list.find((x) => strip(String(v || '')).includes(strip(x)) || strip(x).includes(strip(String(v || '')))) || (v ? String(v).slice(0, 30) : null);
+      const nv = (v) => (v == null || /^(null|none|n\/a|na|desconocido|no aplica|-)?$/i.test(String(v).trim()) ? null : v);
+      const near = (v0, list) => { const v = nv(v0); if (!v) return null; return list.find((x) => strip(x) === strip(String(v || ''))) || list.find((x) => strip(String(v || '')).includes(strip(x)) || strip(x).includes(strip(String(v || '')))) || String(v).slice(0, 30); };
       const lv = c.attrs.map((_, j) => { const v = Array.isArray(o.lv) ? Number(o.lv[j]) : NaN; return v >= 1 && v <= 5 ? Math.round(v) : null; });
       res[p.id] = { cat: c.id, typ: near(o.typ, c.typologies) || c.typologies[0], mat: near(o.mat, c.materials), color: near(o.color, c.colors), lv, conf: ['alta', 'media', 'baja'].includes(o.conf) ? o.conf : 'media', ev: String(o.ev || '').slice(0, 120) };
     });

@@ -43,11 +43,13 @@ async function call({ messages, system, tools, tier, maxTokens, orgId, userId, k
   const client = getClient();
   if (!client) throw err('sampling_disabled', 'La IA no está configurada en el servidor.');
   const req = { model: MODEL, max_tokens: maxTokens || 16000, messages };
+  // En el gateway: sin razonamiento extendido (consume el límite de salida en modelos como Gemini) y con más margen.
+  if (GATEWAY) { req.max_tokens = Math.max(req.max_tokens, Number(process.env.AI_GATEWAY_MAX_TOKENS || 32000)); if (process.env.AI_THINKING !== 'on') req.thinking = { type: 'disabled' }; }
   if (!GATEWAY) Object.assign(req, { output_config: { effort: EFFORT[tier] || 'medium' }, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' });
   if (system) req.system = system;
   if (tools && tools.length) req.tools = tools;
   let res;
-  try { res = GATEWAY ? await client.messages.create(req) : await client.beta.messages.create(req); } catch (e) { throw mapError(e); }
+  try { res = GATEWAY ? await client.messages.create(req, { timeout: Number(process.env.AI_TIMEOUT_MS || 280000) }) : await client.beta.messages.create(req); } catch (e) { throw mapError(e); }
   q('insert into ai_usage (org_id, user_id, kind, model, input_tokens, output_tokens) values ($1,$2,$3,$4,$5,$6)', [orgId || null, userId || null, kind || null, res.model, res.usage && res.usage.input_tokens, res.usage && res.usage.output_tokens]).catch(() => {});
   if (res.stop_reason === 'refusal') throw err('refused', 'La IA no procesó este contenido.');
   return res;
