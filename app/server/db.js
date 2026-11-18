@@ -81,6 +81,7 @@ create table if not exists quick_runs (
 );
 create index if not exists quick_runs_at on quick_runs (at);
 create index if not exists ai_usage_user_at on ai_usage (user_id, kind, at);
+create table if not exists bench_runs (id bigserial primary key, at timestamptz not null default now(), summary jsonb, results jsonb);
 `;
 
 async function migrate() { await pool.query(SCHEMA); }

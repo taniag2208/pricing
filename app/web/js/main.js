@@ -297,6 +297,21 @@
   }
 
   /* ---------- consola Tita: cuentas de clientes ---------- */
+  const REASON_TXT = { robots: 'robots.txt no lo permite', blocked: 'bloquea lecturas automáticas', no_data: 'sin catálogo legible', error: 'error', ia_sin_saldo: 'IA sin créditos', unreachable: 'dominio no responde' };
+  function Coverage() {
+    const [b, setB] = useState(undefined); const [busy, setBusy] = useState(false);
+    useEffect(() => { L.api('GET', '/admin/bench').then(setB).catch(() => setB(null)); }, []);
+    const run = async () => { setBusy(true); try { const r = await L.api('POST', '/admin/bench'); setB({ at: new Date().toISOString(), ...r }); } catch (x) { L.toast(x.message, 'bad'); } setBusy(false); };
+    const sm = b && b.summary;
+    return html`<section className="panel"><div className="row-between"><div><h2>Cobertura de lectura de tiendas</h2><p className="muted">Cada lunes intentamos leer el catálogo de ${b && b.results ? b.results.length : 'unas 40'} tiendas reales de Colombia, México, Perú y Chile. Mide qué tan seguido el análisis rápido funciona sin que el usuario suba archivos.</p></div>
+      <button type="button" className="btn sm" disabled=${busy} onClick=${run}>${busy ? html`<span className="spin"></span> Midiendo (unos 4 minutos)…` : 'Medir ahora'}</button></div>
+      ${b === undefined ? html`<span className="spin"></span>` : !sm ? html`<p className="muted sm">Aún no hay mediciones.</p>` : html`
+        <div className="kpis compact"><div className="kpi"><span>Tiendas leídas</span><b>${Math.round(sm.rate * 100)} %</b><em>${sm.ok} de ${sm.reachable} que respondieron · ${new Date(b.at).toLocaleDateString('es-CO')}</em></div>
+          ${Object.entries(sm.byMethod).map(([k, v]) => html`<div className="kpi" key=${k}><span>${k}</span><b>${v}</b></div>`)}
+          ${Object.entries(sm.byReason).map(([k, v]) => html`<div className="kpi" key=${k}><span>No leídas: ${REASON_TXT[k] || k}</span><b>${v}</b></div>`)}</div>
+        <details className="manual"><summary>Ver detalle por tienda</summary><div className="tw"><table className="tbl"><thead><tr><th>Tienda</th><th>Sector</th><th>Resultado</th><th className="num">Productos</th></tr></thead><tbody>${b.results.slice().sort((x, y) => Number(x.ok) - Number(y.ok)).map((r) => html`<tr key=${r.host}><td><b>${r.host}</b><small>${r.market}</small></td><td>${r.sector}</td><td>${r.ok ? html`<${Badge} tone="ok">${r.method}<//>` : html`<${Badge} tone="down">${REASON_TXT[r.reason] || r.reason}<//>`}</td><td className="num">${r.n || '—'}</td></tr>`)}</tbody></table></div></details>`}
+    </section>`;
+  }
   function AdminHome({ me, open }) {
     const [orgs, setOrgs] = useState(null);
     const [name, setName] = useState('');
@@ -319,7 +334,8 @@
         <section className="panel">${!orgs ? html`<span className="spin"></span>` : orgs.length ? html`<div className="tw"><table className="tbl"><thead><tr><th>Cliente</th><th>Estado</th><th className="num">Tiendas</th><th className="num">Productos</th><th className="num">Usuarios</th><th>Última actividad</th><th></th></tr></thead><tbody>${orgs.map((o) => html`<tr key=${o.id} className="click" onClick=${() => open(o.id)}><td><b>${o.name}</b><small>${o.id}</small></td><td><${Badge} tone=${o.published ? 'ok' : 'warn'}>${o.published ? 'Publicada' : 'En configuración'}<//>${o.last_job === 'running' || o.last_job === 'queued' ? html` <${Badge} tone="info">trabajo en curso<//>` : o.last_job === 'failed' ? html` <${Badge} tone="down">último trabajo falló<//>` : null}</td><td className="num">${o.stores}</td><td className="num">${o.products}</td><td className="num">${o.users}</td><td>${o.updated_at ? new Date(o.updated_at).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</td><td><button type="button" className="btn sm">Abrir</button></td></tr>`)}</tbody></table></div>` : html`<${Empty} icon="store" title="Aún no hay cuentas">Crea la primera cuenta con el nombre del cliente.<//>`}</section>
         <section className="panel"><div className="row-between"><div><h2>Análisis rápidos</h2><p className="muted">Pega el link de cualquier tienda para un análisis sin configurar (por ejemplo, antes de una reunión con un prospecto). Duran 7 días. Los que inician visitantes desde la página pública también aparecen aquí.</p></div>
           <form className="newacct" onSubmit=${runQuick}><input aria-label="Link de la tienda" placeholder="https://tienda.com" value=${qurl} onInput=${(e) => setQurl(e.target.value)} /><button className="btn primary" type="submit" disabled=${!qurl.trim()}>Analizar</button></form></div>
-          ${quick && quick.length ? html`<div className="tw"><table className="tbl"><thead><tr><th>Tienda</th><th>Estado</th><th>Creado</th><th>Vence</th><th></th></tr></thead><tbody>${quick.map((o) => html`<tr key=${o.id} className="click" onClick=${() => open(o.id)}><td><b>${o.name}</b><small>${o.url}</small></td><td><${Badge} tone=${o.status === 'done' ? 'ok' : o.status === 'failed' ? 'down' : 'info'}>${{ done: 'listo', failed: 'falló', queued: 'en cola', running: 'en curso' }[o.status] || '—'}<//>${o.error ? html`<small>${o.error.slice(0, 90)}</small>` : null}</td><td>${new Date(o.created_at).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}</td><td>${new Date(o.expires_at).toLocaleDateString('es-CO')}</td><td><button type="button" className="btn sm">Abrir</button></td></tr>`)}</tbody></table></div>` : html`<p className="muted sm">Aún no hay análisis rápidos.</p>`}</section>
+          ${quick && quick.length ? html`<div className="tw"><table className="tbl"><thead><tr><th>Tienda</th><th>Estado</th><th>Creado</th><th>Vence</th><th></th></tr></thead><tbody>${quick.map((o) => html`<tr key=${o.id} className="click" onClick=${() => open(o.id)}><td><b>${o.name}</b><small>${o.url}</small></td><td><${Badge} tone=${o.status === 'done' ? 'ok' : o.status === 'failed' ? 'down' : 'info'}>${{ done: 'listo', failed: 'falló', queued: 'en cola', running: 'en curso', waiting: 'espera al usuario' }[o.status] || '—'}<//>${o.error ? html`<small>${o.error.slice(0, 90)}</small>` : null}</td><td>${new Date(o.created_at).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}</td><td>${new Date(o.expires_at).toLocaleDateString('es-CO')}</td><td><button type="button" className="btn sm">Abrir</button></td></tr>`)}</tbody></table></div>` : html`<p className="muted sm">Aún no hay análisis rápidos.</p>`}</section>
+        <${Coverage} />
         <section className="panel"><h2>Equipo Tita</h2><p className="muted">Administradores con acceso a todas las cuentas.</p>
           ${msg ? html`<${Note}>Contraseña temporal de <b>${msg.email}</b>: <span className="mono sel">${msg.pw}</span>. Envíala por un canal seguro.<//>` : null}
           ${team ? html`<ul className="plain">${team.map((t) => html`<li key=${t.id}>${t.name} · ${t.email}</li>`)}</ul>` : null}
@@ -352,18 +368,47 @@
     </div></div>`;
   }
   const PHASES = [['own', 'Leyendo el catálogo de la tienda'], ['discover', 'Buscando competidores en la web'], ['comps', 'Leyendo el catálogo de los competidores'], ['cats', 'Proponiendo categorías y atributos'], ['classify', 'Clasificando productos con IA'], ['done', 'Construyendo el análisis']];
+  const hostName = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return u; } };
   function CompsAsk({ org, p, onReset, onSent }) {
+    const confirm = p.phase === 'confirm_comps';
+    const cands = confirm ? p.candidates || [] : [];
+    const [sel, setSel] = useState(() => new Set(cands.map((c) => c.url)));
     const [txt, setTxt] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
-    const urls = txt.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+    const extra = txt.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+    const urls = [...cands.filter((c) => sel.has(c.url)).map((c) => c.url), ...extra];
+    const toggle = (u) => setSel((x) => { const n = new Set(x); n.has(u) ? n.delete(u) : n.add(u); return n; });
     const send = async (e) => { e.preventDefault(); setBusy(true); setErr(''); try { await L.api('POST', '/quick/' + org + '/comps', { urls }); onSent(); } catch (x) { setErr(x.message); setBusy(false); } };
-    const tried = (p.tried || []).map((u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return u; } });
+    const tried = (p.tried || []).map(hostName);
     return html`<form className="urlform" onSubmit=${send}>
-      <${Note} tone="warn">No encontramos competidores con un catálogo público que podamos leer${tried.length ? ' (probamos ' + tried.slice(0, 10).join(', ') + ')' : ''}. Si conoces a tus competidores, escribe sus links y seguimos con el análisis.<//>
-      <label className="fld" htmlFor="qc-u"><span>Links de 2 a 5 competidores (uno por línea)</span><textarea id="qc-u" rows="5" placeholder=${'marca1.com\nmarca2.com.co'} value=${txt} onInput=${(e) => setTxt(e.target.value)}></textarea></label>
-      <p className="hint">Funciona con tiendas en Shopify, VTEX o WooCommerce que publican su catálogo.</p>
+      ${confirm ? html`<p>Encontramos estas tiendas que venden lo mismo que ${p.storeName || 'la tienda'}. Desmarca las que no sean competencia directa y agrega las que falten.</p>
+        <ul className="checks">${cands.map((c) => html`<li key=${c.url}><label className="tgl"><input type="checkbox" checked=${sel.has(c.url)} onChange=${() => toggle(c.url)} /><b>${c.name}</b> <span className="muted">${hostName(c.url)}</span></label></li>`)}</ul>`
+      : html`<${Note} tone="warn">No encontramos competidores cuyo catálogo podamos leer${tried.length ? ' (probamos ' + tried.slice(0, 10).join(', ') + ')' : ''}. Si conoces a tus competidores, escribe sus links y seguimos con el análisis.<//>`}
+      <label className="fld" htmlFor="qc-u"><span>${confirm ? 'Agregar otros competidores (opcional, uno por línea)' : 'Links de 2 a 5 competidores (uno por línea)'}</span><textarea id="qc-u" rows=${confirm ? 3 : 5} placeholder=${'marca1.com\nmarca2.com.co'} value=${txt} onInput=${(e) => setTxt(e.target.value)}></textarea></label>
       ${err ? html`<div className="err" role="alert">${err}</div>` : null}
-      <div className="ob-actions"><button className="btn ghost" type="button" onClick=${onReset}>Analizar otra tienda</button><button className="btn primary" type="submit" disabled=${busy || !urls.length}>${busy ? 'Enviando…' : 'Continuar con estos competidores'}</button></div>
+      <div className="ob-actions"><button className="btn ghost" type="button" onClick=${onReset}>Analizar otra tienda</button><button className="btn primary" type="submit" disabled=${busy || !urls.length}>${busy ? 'Enviando…' : confirm ? 'Analizar con ' + urls.length + ' competidor' + (urls.length === 1 ? '' : 'es') : 'Continuar con estos competidores'}</button></div>
     </form>`;
+  }
+  const OWN_REASON = { unreachable: 'No pudimos conectarnos con la tienda. Revisa que la dirección esté bien escrita.', robots: 'La tienda no permite que programas lean su catálogo (lo indica en su archivo robots.txt) y respetamos esa decisión.', blocked: 'La tienda bloquea las lecturas automáticas.', no_data: 'La tienda no publica su catálogo en un formato que podamos leer automáticamente.' };
+  function OwnAsk({ org, p, onReset, onSent }) {
+    const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
+    const pick = async (e) => {
+      const f = e.target.files && e.target.files[0]; if (!f) return;
+      setBusy(true); setErr('');
+      try {
+        const r = await I.readFile(f);
+        const parsed = r.rows ? { items: I.fromRows(r.rows) } : I.parseText(r.text, null);
+        if (!parsed.items || parsed.items.length < 8) throw new Error('No encontramos al menos 8 productos con nombre y precio. Revisa que el archivo tenga columnas de nombre, precio y categoría.');
+        await L.api('POST', '/quick/' + org + '/catalog', { items: parsed.items.map((x) => ({ name: x.name, price: x.price, promo: x.promo, label: x.label, desc: x.desc, sku: x.sku })) });
+        onSent();
+      } catch (x) { setErr(x.message || 'No se pudo leer el archivo.'); setBusy(false); }
+    };
+    return html`<div className="urlform">
+      <${Note} tone="warn">${OWN_REASON[p.reason] || OWN_REASON.no_data}<//>
+      <p>Puedes seguir con el análisis subiendo el catálogo en un archivo <b>CSV o Excel</b> con columnas de <b>nombre</b>, <b>precio</b> y, si la tienes, <b>categoría</b> y <b>precio de promoción</b>. La exportación de productos de cualquier tienda en línea sirve.</p>
+<div><label className=${'btn primary' + (busy ? ' disabled' : '')}><input type="file" className="sr" accept=".csv,.txt,.xlsx,.xls" onChange=${pick} />${busy ? 'Leyendo archivo…' : 'Subir catálogo (CSV o Excel)'}</label></div>
+      ${err ? html`<div className="err" role="alert">${err}</div>` : null}
+      <div className="ob-actions"><button className="btn ghost" type="button" onClick=${onReset}>Analizar otra tienda</button></div>
+    </div>`;
   }
   function QuickGate({ org, me, children, onReset }) {
     const [st, setSt] = useState(undefined);
@@ -387,8 +432,9 @@
     const detail = { own: p.own != null ? p.own + ' productos tomados para el análisis' + (p.ownTotal > p.own ? ' (de ' + p.ownTotal + ' publicados)' : '') + (p.platform ? ' · ' + p.platform : '') : '', discover: p.candidates ? p.candidates.length + ' candidatos: ' + p.candidates.map((c) => c.name).join(', ') : '', comps: p.found ? p.found.map((f) => f.name + ' (' + f.n + ')').join(', ') || 'Probando tiendas…' : '', cats: p.cats ? p.cats.join(', ') : '', classify: p.classified != null ? p.classified + ' clasificados · ' + (p.left || 0) + ' en cola' : '' };
     return html`<div className="ob"><div className="ob-in wide">
       <div className="brandmark"><span className="logo">T</span>TITA Pricing Intelligence <b>360°</b></div>
-      <div className="ob-head"><h2>${st && st.status === 'failed' && p.phase === 'need_comps' ? '¿Quiénes son tus competidores?' : st && st.status === 'failed' ? 'No pudimos completar el análisis' : 'Analizando ' + (me.org ? me.org.name : 'la tienda') + '…'}</h2><span className="muted sm">Puedes dejar esta pestaña abierta; el análisis avanza mientras la ves.</span></div>
-      ${st && st.status === 'failed' && p.phase === 'need_comps' ? html`<${CompsAsk} org=${org} p=${p} onReset=${onReset} onSent=${() => { setSt({ status: 'queued', progress: { ...p, phase: 'comps', found: p.found || [] } }); setKick((x) => x + 1); }} />` : st && st.status === 'failed' ? html`<div><${Note} tone="warn">${st.error}<//><div className="ob-actions"><button className="btn primary" type="button" onClick=${onReset}>Analizar otra tienda</button></div></div>` : html`<div className="proc">${PHASES.map(([k, t], i) => html`<div key=${k} className=${'procrow ' + (i < cur ? 'done' : i === cur ? 'run' : '')}><span className="st">${i < cur ? html`<${Icon} n="check" s=${12} />` : ''}</span><b>${t}</b><span className="res">${detail[k] || ''}</span></div>`)}</div>`}
+      <div className="ob-head"><h2>${st && st.status === 'waiting' ? (p.phase === 'need_own' ? 'Necesitamos tu catálogo' : p.phase === 'confirm_comps' ? 'Confirma tus competidores' : '¿Quiénes son tus competidores?') : st && st.status === 'failed' ? 'No pudimos completar el análisis' : 'Analizando ' + (me.org ? me.org.name : 'la tienda') + '…'}</h2><span className="muted sm">Puedes dejar esta pestaña abierta; el análisis avanza mientras la ves.</span></div>
+      ${st && st.status === 'waiting' && p.phase === 'need_own' ? html`<${OwnAsk} org=${org} p=${p} onReset=${onReset} onSent=${() => { setSt({ status: 'queued', progress: { ...p, phase: 'discover' } }); setKick((x) => x + 1); }} />` :
+        st && st.status === 'waiting' ? html`<${CompsAsk} key=${p.phase + (p.candidates || []).length} org=${org} p=${p} onReset=${onReset} onSent=${() => { setSt({ status: 'queued', progress: { ...p, phase: 'comps', found: p.found || [] } }); setKick((x) => x + 1); }} />` : st && st.status === 'failed' ? html`<div><${Note} tone="warn">${st.error}<//><div className="ob-actions"><button className="btn primary" type="button" onClick=${onReset}>Analizar otra tienda</button></div></div>` : html`<div className="proc">${PHASES.map(([k, t], i) => html`<div key=${k} className=${'procrow ' + (i < cur ? 'done' : i === cur ? 'run' : '')}><span className="st">${i < cur ? html`<${Icon} n="check" s=${12} />` : ''}</span><b>${t}</b><span className="res">${detail[k] || ''}</span></div>`)}</div>`}
     </div></div>`;
   }
 

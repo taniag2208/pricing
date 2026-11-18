@@ -8,6 +8,7 @@ const jwt = require('jsonwebtoken');
 const { q, migrate } = require('./db');
 const store = require('./store');
 const ai = require('./ai');
+const bench = require('./bench');
 const jobs = require('./jobs');
 const { id, tempPassword, slug } = require('./util');
 
@@ -215,6 +216,8 @@ app.post('/api/orgs/:org/jobs/pump', auth, titaOnly, wrap(async (req, res) => {
 // Cron de Vercel: actualización diaria y avance de la cola. Vercel envía Authorization: Bearer CRON_SECRET.
 app.get('/api/cron', wrap(async (req, res) => {
   if (!process.env.CRON_SECRET || req.get('authorization') !== 'Bearer ' + process.env.CRON_SECRET) throw fail(401, 'unauthorized', 'No autorizado.');
+  // Cron semanal aparte (?bench=1): medición de cobertura de lectura de tiendas.
+  if (req.query.bench) return res.json({ bench: (await bench.run(250000)).summary });
   const orgs = await jobs.enqueueRefreshAll();
   const steps = await jobs.drain(null, Number(process.env.CRON_BUDGET_MS || 270000));
   res.json({ orgs, steps });
@@ -275,9 +278,28 @@ app.post('/api/quick/:org/comps', auth, orgAccess(1), wrap(async (req, res) => {
   if (!j) throw fail(404, 'not_found', 'No hay análisis.');
   const p = j.progress || {};
   const tried = (p.tried || []).filter((u) => !urls.includes(u));
-  await q("update jobs set status = 'queued', error = null, lease_until = null, updated_at = now(), progress = $2 where id = $1", [j.id, { ...p, phase: 'comps', manual: true, tried, candidates: urls.map((u) => ({ name: TPI.ingest.hostOf(u), url: u })) }]);
+  const named = Object.fromEntries((p.candidates || []).map((c) => [TPI.ingest.origin(c.url), c.name]));
+  await q("update jobs set status = 'queued', error = null, lease_until = null, updated_at = now(), progress = $2 where id = $1", [j.id, { ...p, phase: 'comps', manual: true, tried, candidates: urls.map((u) => ({ name: named[u] || TPI.ingest.hostOf(u), url: u })) }]);
   res.json({ ok: true });
 }));
+// Catálogo propio subido por el usuario (CSV o Excel ya interpretados en el navegador) cuando la tienda no se puede leer.
+app.post('/api/quick/:org/catalog', auth, orgAccess(1), wrap(async (req, res) => {
+  const k = (await q('select kind from orgs where id = $1', [req.params.org])).rows[0];
+  if (!k || k.kind !== 'quick') throw fail(400, 'invalid', 'No es un análisis rápido.');
+  const raw = Array.isArray(req.body.items) ? req.body.items.slice(0, 3000) : [];
+  const items = raw.map((o, i) => TPI.ingest.mkItem({ id: 'f:' + (o.sku || TPI.ingest.slug(String(o.name || '')) + '-' + i), name: o.name, label: o.label, price: Number(o.price), promo: Number(o.promo) > 0 ? Number(o.promo) : null, desc: o.desc, sku: o.sku })).filter((x) => x.name && x.price > 0);
+  if (items.length < 8) throw fail(400, 'invalid', 'El archivo necesita al menos 8 productos con nombre y precio.');
+  const j = (await q("select id, progress from jobs where org_id = $1 and type = 'quick' order by created_at desc limit 1", [req.params.org])).rows[0];
+  if (!j) throw fail(404, 'not_found', 'No hay análisis.');
+  const pick = items.length <= 90 ? items : items.filter((_, i) => i % Math.ceil(items.length / 90) === 0).slice(0, 90);
+  const chunks = await jobs.saveCatalog(req.params.org, 'own', pick, 0);
+  const s = await store.get(req.params.org, 'stores', 'own');
+  await store.put(req.params.org, 'stores', 'own', { ...s, n: pick.length, total: items.length, chunks, platform: 'Archivo', importedAt: new Date().toISOString() }, 'sistema');
+  await q("update jobs set status = 'queued', error = null, lease_until = null, updated_at = now(), progress = $2 where id = $1", [j.id, { ...(j.progress || {}), phase: 'discover', own: pick.length, ownTotal: items.length, platform: 'Archivo' }]);
+  res.json({ ok: true, n: pick.length });
+}));
+app.get('/api/admin/bench', auth, titaOnly, wrap(async (req, res) => res.json(await bench.latest())));
+app.post('/api/admin/bench', auth, titaOnly, wrap(async (req, res) => res.json(await bench.run(250000))));
 app.get('/api/admin/quick', auth, titaOnly, wrap(async (req, res) => {
   res.json((await q(`select o.id, o.name, o.meta->>'url' as url, o.created_at, o.expires_at,
       (select status from jobs j where j.org_id = o.id and j.type = 'quick' order by created_at desc limit 1) as status,

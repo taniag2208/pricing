@@ -18,7 +18,6 @@ function keywordsOf(items) {
   items.forEach((p) => { const seen = new Set(); (n(p.label) + ' ' + n(p.name).split(/\s+/).slice(0, 3).join(' ')).split(/[^a-z]+/).forEach((w) => { if (w.length < 4 || STOP.has(w) || seen.has(w)) return; seen.add(w); cnt[w] = (cnt[w] || 0) + 1; }); });
   return Object.entries(cnt).filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]).slice(0, 25).map(([w]) => (w.length > 5 && /s$/.test(w) ? w.slice(0, -1) : w));
 }
-const needComps = () => Object.assign(new Error('No encontramos competidores con un catálogo público que podamos leer. Escribe los links de 2 a 5 competidores y seguimos con el análisis.'), { code: 'need_comps' });
 const BATCH = Number(process.env.CLASSIFY_BATCH || ((process.env.AI_PROVIDER || '').toLowerCase() === 'gateway' ? 20 : 40));
 const MAX_BATCHES = Number(process.env.CLASSIFY_MAX_BATCHES || 150);
 const CONCURRENCY = Number(process.env.JOB_CONCURRENCY || 2);
@@ -128,10 +127,12 @@ const RUN = {
     if (phase === 'own') {
       const s = await store.get(org, 'stores', 'own');
       let res;
-      try { res = await crawl(s.url, null, { maxPages: Number(process.env.QUICK_OWN_PAGES || 3), sitemapMax: Number(process.env.QUICK_OWN_MAX || 90), deadline: job.deadline - 60000 }); }
+      try { res = await crawl(s.url, null, { maxPages: Number(process.env.QUICK_OWN_PAGES || 3), sitemapMax: Number(process.env.QUICK_OWN_MAX || 90), deadline: job.deadline - 60000, ai: ai.facade({ ...owner, kind: 'quick-extract' }) }); }
       catch (e) {
-        if (e.code === 'unreachable') throw new Error('No pudimos conectarnos con ' + s.url + '. Revisa que la dirección esté bien escrita.');
-        throw new Error('No pudimos leer el catálogo de ' + s.url + ': la tienda no publica su catálogo en un formato abierto o su robots.txt no lo permite.');
+        if (e.code === 'billing') throw e;
+        // Sin salida automática: se le pide al usuario el catálogo en un archivo (CSV o Excel) en vez de fallar.
+        await save({ phase: 'need_own', reason: e.code === 'unreachable' ? 'unreachable' : e.reason || 'no_data' });
+        return { wait: true };
       }
       const items = cap(res.items, Number(process.env.QUICK_OWN_MAX || 90));
       if (items.length < 8) throw new Error('La tienda publica muy pocos productos (' + items.length + ') para analizar.');
@@ -161,9 +162,10 @@ const RUN = {
       const comps = (out.competitors || []).filter((c) => c && c.url && /^https?:\/\//.test(c.url) && host(c.url) && !seen.has(host(c.url)) && seen.add(host(c.url))).slice(0, 12);
       const market = ['CO', 'MX', 'PE', 'CL'].includes(out.country) ? out.country : (st.market || 'CO');
       if (out.storeName) await store.put(org, 'stores', 'own', { ...s, name: out.storeName }, 'sistema');
-      if (!comps.length) { await save({ phase: 'need_comps', market, storeName: out.storeName || st.storeName || s.name }); throw needComps(); }
-      await save({ phase: 'comps', candidates: comps, market, storeName: out.storeName || st.storeName || s.name });
-      return { partial: true };
+      if (!comps.length) { await save({ phase: 'need_comps', market, storeName: out.storeName || st.storeName || s.name }); return { wait: true }; }
+      // El usuario confirma, quita o agrega competidores antes de leerlos.
+      await save({ phase: 'confirm_comps', candidates: comps, market, storeName: out.storeName || st.storeName || s.name });
+      return { wait: true };
     }
     if (phase === 'comps') {
       const found = st.found || [], tried = st.tried || [];
@@ -177,7 +179,7 @@ const RUN = {
       for (let i = 0; i < todo.length && found.length < want && Date.now() < job.deadline - 100000; i += 4) {
         const group = todo.slice(i, i + 4);
         group.forEach((c) => tried.push(c.url));
-        const copts = { maxPages: Number(process.env.QUICK_COMP_PAGES || 6), enough: 150, keywords: st.keywords, sitemapMax: 50, deadline: job.deadline - 60000 };
+        const copts = { maxPages: Number(process.env.QUICK_COMP_PAGES || 6), enough: 150, keywords: st.keywords, sitemapMax: 50, deadline: job.deadline - 60000, ai: ai.facade({ ...owner, kind: 'quick-extract' }), textMax: 50 };
         const got = await Promise.all(group.map((c) => crawl(c.url, null, copts).then((res) => ({ c, res }), () => null)));
         for (const g of got) {
           if (!g || g.res.items.length < 10 || found.length >= want) continue;
@@ -193,7 +195,7 @@ const RUN = {
       if (pending) return { partial: true };
       // Pocos competidores legibles: una segunda búsqueda excluyendo los que no sirvieron; si tampoco, se le piden al usuario.
       if (found.length < 2 && !st.round2 && !st.manual) { await save({ phase: 'discover', round2: true }); return { partial: true }; }
-      if (!found.length) { await save({ phase: 'need_comps' }); throw needComps(); }
+      if (!found.length) { await save({ phase: 'need_comps' }); return { wait: true }; }
       await save({ phase: 'cats' });
       return { partial: true };
     }
@@ -263,6 +265,7 @@ async function step(org) {
   try {
     const result = await RUN[job.type](job);
     if (result && result.partial) await q("update jobs set status = 'queued', lease_until = null, updated_at = now() where id = $1", [job.id]);
+    else if (result && result.wait) await q("update jobs set status = 'waiting', lease_until = null, updated_at = now() where id = $1", [job.id]);
     else await q("update jobs set status = 'done', lease_until = null, progress = progress || $2, updated_at = now() where id = $1", [job.id, { result }]);
   } catch (e) {
     const msg = String((e && (e.message || e.code)) || e);
@@ -292,4 +295,4 @@ function start() {
   if (when !== 'off') cron.schedule(when, () => enqueueRefreshAll().catch(() => {}), { timezone: process.env.TZ || 'America/Bogota' });
 }
 
-module.exports = { enqueue, start, step, drain, enqueueRefreshAll, RUN };
+module.exports = { enqueue, start, step, drain, enqueueRefreshAll, RUN, saveCatalog };

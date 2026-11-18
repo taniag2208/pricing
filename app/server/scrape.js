@@ -70,6 +70,47 @@ function ldProduct(html, url) {
   return { id: 'l:' + (prod.sku || prod.productID || url.split('/').filter(Boolean).slice(-2).join('-')), name: String(prod.name).trim(), label: label ? String(label).trim() : null, price: list || price, promo: list ? price : null, url, desc: String(prod.description || ''), sku: prod.sku ? String(prod.sku) : null, avail };
 }
 
+// Respaldo: etiquetas meta (Open Graph / microdatos) de la ficha de producto.
+function metaProduct(html, url) {
+  const meta = (k) => { const m = html.match(new RegExp('<meta[^>]+(?:property|name|itemprop)=["\']' + k + '["\'][^>]*>', 'i')); if (!m) return null; const c = m[0].match(/content=["\']([^"\']*)["\']/i); return c ? c[1] : null; };
+  const ip = (html.match(/itemprop=["']price["'][^>]*content=["']([\d.,]+)["']/i) || html.match(/content=["']([\d.,]+)["'][^>]*itemprop=["']price["']/i) || [])[1];
+  const raw = meta('product:price:amount') || meta('og:price:amount') || meta('twitter:data1') || ip;
+  const price = TP.ingest.parseMoney(raw);
+  const name = meta('og:title') || (html.match(/<title>([^<]+)<\/title>/i) || [])[1];
+  if (!(price > 0) || !name) return null;
+  const list = TP.ingest.parseMoney(meta('product:original_price:amount') || meta('og:original_price:amount'));
+  return { id: 'm:' + url.split('/').filter(Boolean).slice(-2).join('-').slice(0, 100), name: String(name).replace(/\s*[|–-]\s*[^|–-]+$/, '').trim(), label: meta('product:category') || null, price: list > price ? list : price, promo: list > price ? price : null, url, desc: meta('og:description') || meta('description') || '', sku: meta('product:retailer_item_id') };
+}
+
+// Último respaldo: texto de las páginas de categoría, del que la IA extrae nombre y precio (para tiendas sin catálogo ni datos estructurados).
+const SKIP = /cuenta|account|login|registro|carrito|cart|checkout|blog|ayuda|help|contact|politica|policy|terminos|terms|faq|nosotros|about|tiendas|stores|garantia|devoluc|envios|pqr|trabaja|wishlist|favorit|search|buscar|\.(jpg|png|pdf)$/i;
+async function crawlText(origin, allowed, opts) {
+  if (!opts.ai) return null;
+  let home; try { home = await get(origin + '/', 'text/html', 15000); } catch (e) { return null; }
+  if (!home.ok) return null;
+  const links = [];
+  const re = /<a[^>]+href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi; let m;
+  while ((m = re.exec(home.text)) && links.length < 400) {
+    let u; try { u = new URL(m[1], origin); } catch (e) { continue; }
+    const txt = m[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (u.origin !== origin || SKIP.test(u.pathname) || u.pathname === '/' || u.pathname.split('/').filter(Boolean).length > 3 || !txt || txt.length > 40) continue;
+    if (!allowed(u.pathname + u.search) || links.some((l) => l.url === u.href)) continue;
+    links.push({ url: u.href, txt });
+  }
+  const keep = relevant(opts.keywords);
+  const ranked = links.map((l) => ({ ...l, score: (keep(l.txt + ' ' + l.url) && opts.keywords ? 2 : 0) + (/\/(c|categoria|category|collections?|productos?|shop|tienda)\//i.test(l.url) ? 1 : 0) })).sort((a, b) => b.score - a.score);
+  const items = [];
+  for (const l of ranked.slice(0, 8)) {
+    if (items.length >= (opts.textMax || 60) || (opts.deadline && Date.now() > opts.deadline)) break;
+    let page; try { page = await get(l.url, 'text/html', 15000); } catch (e) { continue; }
+    if (!page.ok) continue;
+    const text = page.text.replace(/<(script|style|noscript|svg)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+    if ((text.match(/\$\s?\d{1,3}([.,]\d{3})+|\$\s?\d{4,}/g) || []).length < 5) continue;
+    try { const got = await TP.ingest.extractFromText(opts.ai, text.slice(0, 40000), origin); got.forEach((p) => { if (!p.label || p.label === 'Sin categoría') p.label = l.txt; items.push(p); }); } catch (e) { if (e && e.code === 'billing') throw e; }
+  }
+  return items.length >= 5 ? { platform: 'Texto de la página (extraído con IA)', origin, items, pages: items.length } : null;
+}
+
 async function sitemapUrls(origin, allowed, want) {
   const seen = new Set(), maps = [];
   try { const r = await get(origin + '/robots.txt', 'text/plain', 12000); (r.text.match(/^\s*sitemap:\s*(\S+)/gim) || []).forEach((l) => maps.push(l.split(/:\s*/).slice(1).join(':').trim())); } catch (e) { /* sin robots */ }
@@ -99,7 +140,7 @@ async function crawlSitemap(origin, allowed, opts, onProgress) {
   const items = [];
   for (let i = 0; i < urls.length; i += 6) {
     if (opts.deadline && Date.now() > opts.deadline) break;
-    const got = await Promise.all(urls.slice(i, i + 6).map((u) => get(u, 'text/html', 15000).then((r) => (r.ok ? ldProduct(r.text, u) : null), () => null)));
+    const got = await Promise.all(urls.slice(i, i + 6).map((u) => get(u, 'text/html', 15000).then((r) => (r.ok ? ldProduct(r.text, u) || metaProduct(r.text, u) : null), () => null)));
     got.forEach((p) => p && items.push(TP.ingest.mkItem(p)));
     onProgress && onProgress({ platform: 'Sitemap', pages: i + 6, items: items.length });
     await sleep(Math.min(DELAY, 300));
@@ -112,12 +153,13 @@ async function crawlOrigin(origin, onProgress, opts) {
   const allowed = await robots(origin);
   const keep = relevant(opts.keywords);
   const tried = [];
-  let net = 0;
+  let net = 0, robotsBlocked = 0, httpBlocked = 0;
   for (const [name, P] of Object.entries(PLATFORMS)) {
     const u = new URL(P.first(origin));
-    if (!allowed(u.pathname + u.search)) { tried.push(name + ': bloqueado por robots.txt'); continue; }
+    if (!allowed(u.pathname + u.search)) { robotsBlocked++; tried.push(name + ': bloqueado por robots.txt'); continue; }
     let r;
     try { r = await get(u.href); } catch (e) { net++; tried.push(name + ': ' + ((e.cause && e.cause.code) || e.message)); continue; }
+    if ([401, 403, 429, 503].includes(r.status)) httpBlocked++;
     let j; try { j = JSON.parse(r.text); } catch (e) { tried.push(name + ': sin JSON (' + r.status + ')'); continue; }
     if (P.count(j) < 0) { tried.push(name + ': formato distinto'); continue; }
     const by = {};
@@ -143,8 +185,13 @@ async function crawlOrigin(origin, onProgress, opts) {
   const sm = await crawlSitemap(origin, allowed, opts, onProgress).catch(() => null);
   if (sm) return sm;
   tried.push('Sitemap: sin productos con datos estructurados');
+  const tx = await crawlText(origin, allowed, opts);
+  if (tx) return tx;
+  if (opts.ai) tried.push('Texto: sin precios legibles');
   const e = new Error('No se encontró un catálogo público (' + tried.join(' · ') + '). Usa la importación por archivo o por texto.');
   e.code = 'no_catalog';
+  // causa principal, para explicarla al usuario y medir la cobertura
+  e.reason = httpBlocked >= 2 ? 'blocked' : robotsBlocked >= 2 ? 'robots' : 'no_data';
   throw e;
 }
 
@@ -158,4 +205,4 @@ async function crawl(storeUrl, onProgress, opts = {}) {
   catch (e) { if (e.code !== 'unreachable' && e.code !== 'no_catalog') throw e; try { return await crawlOrigin(alt, onProgress, opts); } catch (e2) { throw e.code === 'unreachable' && e2.code === 'no_catalog' ? e2 : e; } }
 }
 
-module.exports = { crawl, robots, UA, ldProduct };
+module.exports = { crawl, robots, UA, ldProduct, metaProduct };
