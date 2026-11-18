@@ -26,6 +26,7 @@ app.set('trust proxy', 1);
 // En serverless (Vercel) las migraciones y el administrador inicial se preparan en la primera petición.
 let booted = null;
 const boot = () => booted || (booted = bootstrap().catch((e) => { booted = null; throw e; }));
+app.use((req, res, next) => { ai.setOidc(req.headers['x-vercel-oidc-token']); next(); });
 app.use((req, res, next) => (req.path.startsWith('/api/') || req.path === '/healthz' ? boot().then(() => next(), (e) => { console.error(e); res.status(503).json({ code: 'db_unavailable', error: 'Base de datos no disponible.' }); }) : next()));
 app.use(express.json({ limit: '4mb' }));
 app.use(cookieParser());
@@ -203,7 +204,7 @@ app.get('/api/orgs/:org/jobs', auth, orgAccess(1), wrap(async (req, res) => {
 app.post('/api/orgs/:org/jobs', auth, titaOnly, wrap(async (req, res) => {
   const { type, params } = req.body;
   if (!['ingest', 'propose', 'map', 'classify', 'refresh'].includes(type)) throw fail(400, 'invalid', 'Tipo de trabajo inválido.');
-  if (type !== 'ingest' && type !== 'refresh' && !ai.configured()) throw fail(400, 'sampling_disabled', 'Falta configurar ANTHROPIC_API_KEY en el servidor.');
+  if (type !== 'ingest' && type !== 'refresh' && !ai.configured()) throw fail(400, 'sampling_disabled', 'La IA no está configurada en el servidor.');
   res.json({ id: await jobs.enqueue(req.params.org, type, params || {}, req.user.id) });
 }));
 

@@ -133,7 +133,7 @@
       const upd = (patch) => setMsgs((m) => { const n = [...m]; n[n.length - 1] = { ...n[n.length - 1], ...patch }; return n; });
       try {
         const res = await sref.current([{ role: 'user', content: RULES + '\n\nEspacio: ' + E.D.brandById.own.name + ', ' + E.cats.length + ' categorías, ' + E.cfg.comps.length + ' competidores, moneda ' + E.mk.currency + '. Vista actual: categoría ' + (cat ? cat.name : '—') + '.' }, ...hist, { role: 'user', content: text }], { tools: tools(E, actions), signal: ctl.current.signal, cache: false, onText: ({ text: t }) => upd({ raw: t }) });
-        upd({ raw: res.text, live: false, basis: 'Respondido por Claude con las herramientas de datos de este espacio.' });
+        upd({ raw: res.text, live: false, basis: 'Respondido por la IA con las herramientas de datos de este espacio.' });
       } catch (e) {
         if (e.code === 'not_granted' || e.code === 'tools_unavailable' || e.code === 'sampling_disabled') { setMode('rules'); setMsgs((m) => m.slice(0, -2)); askRules(text, forced); }
         else upd({ raw: (e.text || '') + (e.code === 'cancelled' ? '' : '\n\n' + I.errText(e)), live: false });
@@ -142,7 +142,7 @@
     };
     if (!open) return null;
     return html`<aside className="copilot" aria-label="Copiloto de pricing">
-      <div className="cphead"><div><b><${Icon} n="spark" /> Copiloto de pricing</b><small>${mode === 'llm' ? 'Claude responde con los datos de tu cuenta y te lleva a la vista que lo respalda.' : mode === 'rules' ? 'Claude no está disponible en este momento: respondo con reglas calculadas sobre tus datos.' : 'Conectando…'}</small></div><button type="button" className="iconbtn" aria-label="Cerrar copiloto" onClick=${() => setOpen(false)}><${Icon} n="x" /></button></div>
+      <div className="cphead"><div><b><${Icon} n="spark" /> Copiloto de pricing</b><small>${mode === 'llm' ? 'La IA responde con los datos de tu cuenta y te lleva a la vista que lo respalda.' : mode === 'rules' ? 'La IA no está disponible en este momento: respondo con reglas calculadas sobre tus datos.' : 'Conectando…'}</small></div><button type="button" className="iconbtn" aria-label="Cerrar copiloto" onClick=${() => setOpen(false)}><${Icon} n="x" /></button></div>
       <div className="cpbody">
         ${!msgs.length ? html`<p className="muted">Pregunta sobre tus precios, categorías o competidores. Te llevo a la vista que respalda cada respuesta.</p>` : null}
         ${msgs.map((m, i) => (m.who === 'u' ? html`<div key=${i} className="msg u">${m.text}</div>` : m.raw != null ? html`<div key=${i} className="msg a">${m.raw ? md(m.raw) : html`<span className="muted">Pensando…</span>`}${m.basis ? html`<small className="basis">${m.basis}</small>` : null}</div>` : html`<div key=${i} className="msg a">${m.text}${m.action ? html`<button type="button" className="btn sm" onClick=${() => { m.action.fn(); if (innerWidth < 900) setOpen(false); }}>${m.action.l}<${Icon} n="arrow" /></button>` : null}${m.basis ? html`<small className="basis">${m.conf ? html`<b>Confianza: ${m.conf.toLowerCase()}.</b> ` : null}${m.basis}</small>` : null}</div>`))}
@@ -287,7 +287,7 @@
         <header className="top">
           <button type="button" className="iconbtn menu" aria-label="Abrir menú" onClick=${() => setNavOpen(true)}><${Icon} n="menu" /></button>
           <div className="topctx"><b>${D.brandById.own.name}</b><span className="muted">${(ws.stores.own && ws.stores.own.url) ? I.hostOf(ws.stores.own.url) : ''}</span><span className="pill">${E.mk.currency}</span><span className="pill">${D.products.filter((p) => p.cat).length} productos clasificados</span>${(ws.stores.own || {}).importedAt ? html`<span className="pill">Datos al ${new Date(ws.stores.own.importedAt).toLocaleDateString('es-CO')}</span>` : null}${!P.write ? html`<span className="pill demo">Solo lectura</span>` : null}</div>
-          <button type="button" className=${'btn sm cpbtn ' + (cpOpen ? 'primary' : '')} disabled=${!me.ai} title=${me.ai ? '' : 'Falta configurar la API de Claude en el servidor'} onClick=${() => setCpOpen(!cpOpen)} aria-expanded=${cpOpen}><${Icon} n="spark" />Copiloto</button>
+          <button type="button" className=${'btn sm cpbtn ' + (cpOpen ? 'primary' : '')} disabled=${!me.ai} title=${me.ai ? '' : 'La IA no está configurada en el servidor'} onClick=${() => setCpOpen(!cpOpen)} aria-expanded=${cpOpen}><${Icon} n="spark" />Copiloto</button>
         </header>
         <main id="content">${view}</main>
       </div>
@@ -312,7 +312,7 @@
     const addTeam = async (e) => { e.preventDefault(); try { const r = await L.api('POST', '/admin/team', tf); setMsg({ email: tf.email, pw: r.tempPassword }); setTf({ name: '', email: '' }); load(); } catch (x) { L.toast(x.message, 'bad'); } };
     return html`<div className="adminhome"><header className="top"><div className="topctx"><span className="logo">T</span><b>Consola Tita · Pricing Intelligence 360°</b></div><span className="sm muted">${me.user.name}</span><button type="button" className="btn sm ghost" onClick=${() => L.api('POST', '/logout').then(() => location.reload())}>Cerrar sesión</button></header>
       <div className="page">
-        ${!me.ai ? html`<${Note} tone="warn">El servidor no tiene configurada la API de Claude (ANTHROPIC_API_KEY): la importación automática funciona, pero no se pueden proponer categorías, clasificar ni usar el copiloto.<//>` : null}
+        ${!me.ai ? html`<${Note} tone="warn">La IA no está disponible en el servidor: la importación automática funciona, pero no se pueden proponer categorías, clasificar ni usar el copiloto.<//>` : null}
         ${me.user.mustChange ? null : null}
         <header className="ph"><div><div className="eyebrow">Cuentas de clientes</div><h1>¿Qué cuentas administra Tita?</h1><p>Cada cuenta tiene su tienda, sus competidores, sus categorías y sus usuarios. El cliente solo ve su cuenta, y solo cuando la publicas.</p></div>
           <form className="newacct" onSubmit=${create}><label className="fld" htmlFor="no-n"><span>Nueva cuenta</span><input id="no-n" placeholder="Nombre del cliente" value=${name} onInput=${(e) => setName(e.target.value)} /></label><button className="btn primary" type="submit" disabled=${!name.trim()}>Crear y configurar</button></form></header>
@@ -341,7 +341,7 @@
     return html`<div className="ob"><div className="ob-in">
       <div className="row-between"><div className="brandmark"><span className="logo">T</span>TITA Pricing Intelligence <b>360°</b></div><button type="button" className="linkbtn sm" onClick=${onLogin}>Ingreso equipo Tita</button></div>
       <h1>Descubre oportunidades de rentabilidad en tu catálogo.</h1>
-      <p className="lead">Pega el link de una tienda online. Leemos su catálogo público, Claude encuentra a sus competidores, entiende los productos y te mostramos dónde está caro, dónde está barato y qué espacios del mercado no está cubriendo.</p>
+      <p className="lead">Pega el link de una tienda online. Leemos su catálogo público, la IA encuentra a sus competidores, entiende los productos y te mostramos dónde está caro, dónde está barato y qué espacios del mercado no está cubriendo.</p>
       <form className="urlform" onSubmit=${go}>
         <label htmlFor="q-url">Dirección de la tienda</label>
         <div className="urlrow"><${Icon} n="store" /><input id="q-url" type="text" inputMode="url" autoComplete="url" placeholder="https://mitienda.com" value=${url} onInput=${(e) => setUrl(e.target.value)} /><button className="btn primary" type="submit" disabled=${busy || !url.trim()}>${busy ? 'Preparando…' : 'Analizar'}<${Icon} n="arrow" /></button></div>
@@ -351,7 +351,7 @@
       <ul className="checks"><li className="ok"><${Icon} n="check" s=${14} />Solo usamos información pública de las tiendas: productos, precios y fichas.</li><li className="ok"><${Icon} n="check" s=${14} />Sin registro ni configuración.</li></ul>
     </div></div>`;
   }
-  const PHASES = [['own', 'Leyendo el catálogo de la tienda'], ['discover', 'Buscando competidores en la web'], ['comps', 'Leyendo el catálogo de los competidores'], ['cats', 'Proponiendo categorías y atributos'], ['classify', 'Clasificando productos con Claude'], ['done', 'Construyendo el análisis']];
+  const PHASES = [['own', 'Leyendo el catálogo de la tienda'], ['discover', 'Buscando competidores en la web'], ['comps', 'Leyendo el catálogo de los competidores'], ['cats', 'Proponiendo categorías y atributos'], ['classify', 'Clasificando productos con IA'], ['done', 'Construyendo el análisis']];
   function QuickGate({ org, me, children, onReset }) {
     const [st, setSt] = useState(undefined);
     useEffect(() => {

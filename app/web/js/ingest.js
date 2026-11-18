@@ -1,6 +1,6 @@
 /* TITA Pricing Intelligence 360° — ingesta de catálogos reales y tareas de IA.
    Formatos: Shopify (/products.json), WooCommerce (Store API), VTEX (catalog search),
-   CSV/TSV, Excel y texto de una página (extracción con Claude). */
+   CSV/TSV, Excel y texto de una página (extracción con IA). */
 (function () {
   'use strict';
   const TP = window.TP;
@@ -169,16 +169,16 @@
 
   /* ---------- IA (capability sample) ---------- */
   const errText = (e) => ({
-    not_granted: 'Tu rol no permite usar esta función de Claude.',
-    forbidden: 'Tu rol no permite usar esta función de Claude.',
-    sampling_disabled: 'La integración con Claude no está configurada en el servidor. Avísale al equipo de Tita.',
-    rate_limited: 'Se alcanzó el límite de uso de Claude por ahora. Espera un momento e intenta de nuevo.',
-    invalid_json: 'La respuesta de Claude no llegó en el formato esperado. Intenta de nuevo; si se repite, usa un lote más pequeño.',
+    not_granted: 'Tu rol no permite usar esta función de IA.',
+    forbidden: 'Tu rol no permite usar esta función de IA.',
+    sampling_disabled: 'La IA no está configurada en el servidor. Avísale al equipo de Tita.',
+    rate_limited: 'Se alcanzó el límite de uso de la IA por ahora. Espera un momento e intenta de nuevo.',
+    invalid_json: 'La respuesta de la IA no llegó en el formato esperado. Intenta de nuevo; si se repite, usa un lote más pequeño.',
     prompt_too_large: 'Demasiado texto para una sola consulta. Usa un lote más pequeño o pega menos texto.',
-    refused: 'Claude no procesó este contenido. Revisa el texto pegado.',
+    refused: 'La IA no procesó este contenido. Revisa el texto pegado.',
     cancelled: 'Cancelado.',
     session_expired: 'Tu sesión expiró. Vuelve a iniciar sesión.',
-  }[e && e.code] || (e && e.message) || 'No se pudo completar la consulta a Claude. Intenta de nuevo.');
+  }[e && e.code] || (e && e.message) || 'No se pudo completar la consulta a la IA. Intenta de nuevo.');
   I.errText = errText;
   // Claude se llama a través del servidor (la API key nunca llega al navegador).
   const toB64 = (blob) => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(blob); });

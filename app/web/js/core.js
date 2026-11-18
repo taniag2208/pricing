@@ -182,7 +182,7 @@
         ${[['all', 'Todas', all.length], ['equiv', 'Equivalentes', all.filter((h) => h.status === 'equiv').length], ['partial', 'Mixtas', all.filter((h) => h.status === 'partial').length], ['noequiv', 'No equivalentes', all.filter((h) => h.status === 'noequiv').length], ['pending', 'Sin revisar', E.pendingMaps]].map(([k, l, n]) => html`<button key=${k} type="button" className=${'sumc ' + (st === k ? 'on' : '')} onClick=${() => setSt(k)}><b>${n}</b><span>${l}</span></button>`)}
         <${Select} id="h-cat" label="Mi categoría" value=${cf} onChange=${setCf} options=${[{ v: 'all', l: 'Todas' }, ...E.cats.map((c) => ({ v: c.id, l: c.name }))]} compact />
       </div>
-      ${lock ? html`<${Note}>Estas equivalencias las configura y revisa el equipo de Tita.<//>` : null}<${Note}>La homologación se decide por <b>contenido</b>, no solo por nombres: la categoría que Claude asignó a cada producto (por su nombre y ficha), sus tipos, materiales y rango de precio. Una etiqueta mixta se segmenta y solo entran los productos equivalentes.<//>
+      ${lock ? html`<${Note}>Estas equivalencias las configura y revisa el equipo de Tita.<//>` : null}<${Note}>La homologación se decide por <b>contenido</b>, no solo por nombres: la categoría que la IA asignó a cada producto (por su nombre y ficha), sus tipos, materiales y rango de precio. Una etiqueta mixta se segmenta y solo entran los productos equivalentes.<//>
       <div className="maplist">${rows.map((h) => {
         const c = E.D.catById[h.cat], d = dec.map[h.key];
         const included = d === 'reject' ? false : h.status === 'noequiv' ? d === 'accept' || d === 'all' : true;
@@ -335,7 +335,7 @@
     return html`<div>
       <div className="kpis">
         <div className="kpi"><span>Con atributos completos</span><b>${all.filter((p) => !p.imputed).length}<small> de ${all.length} productos</small></b><em>tus productos con todos sus atributos calificados</em></div>
-        <div className="kpi"><span>Por confirmar</span><b>${pend}<small> productos</small></b><em>Claude no está seguro de algún atributo · <button type="button" className="linkbtn" onClick=${() => go('data', { sub: 'revision' })}>Revisar</button></em></div>
+        <div className="kpi"><span>Por confirmar</span><b>${pend}<small> productos</small></b><em>La IA no está segura de algún atributo · <button type="button" className="linkbtn" onClick=${() => go('data', { sub: 'revision' })}>Revisar</button></em></div>
         <div className="kpi"><span>Tu marca frente al mercado</span><b>${isFinite(so - sm) ? (so - sm >= 0 ? '+' : '') + (so - sm).toFixed(2).replace('.', ',') : '—'}<small> puntos de atributos</small></b><em>${E.D.brandById.own.name} ${isFinite(so) ? so.toFixed(2).replace('.', ',') : '—'} · competencia ${isFinite(sm) ? sm.toFixed(2).replace('.', ',') : '—'} · ${cat.short}</em></div>
       </div>
       <section className="panel"><${UI.ValueScatter} pts=${pts} bands=${b} mk=${E.mk} ownName=${E.D.brandById.own.name} onPick=${(p) => { if (p.brand === 'own') { setFocus(p.id); setSub('producto'); } }} />

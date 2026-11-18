@@ -3,40 +3,53 @@ const AnthropicMod = require('@anthropic-ai/sdk');
 const { q } = require('./db');
 
 const Anthropic = AnthropicMod.default || AnthropicMod;
-const client = process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN ? new Anthropic() : null;
-const MODEL = process.env.AI_MODEL || 'claude-opus-5-5';
+// Proveedor: 'gateway' = Vercel AI Gateway (créditos de Vercel, autenticación OIDC del despliegue o AI_GATEWAY_API_KEY);
+// 'anthropic' = API de Anthropic directa con ANTHROPIC_API_KEY.
+const GATEWAY = (process.env.AI_PROVIDER || '').toLowerCase() === 'gateway';
+const MODEL = process.env.AI_MODEL || (GATEWAY ? 'google/gemini-2.5-flash' : 'claude-opus-5-5');
+let oidc = process.env.VERCEL_OIDC_TOKEN || '';
+const setOidc = (t) => { if (t) oidc = t; };
+const gwKey = () => process.env.AI_GATEWAY_API_KEY || oidc;
+let gwClient = null, gwToken = null;
+function getClient() {
+  if (!GATEWAY) return anthropicClient;
+  const k = gwKey();
+  if (!k) return null;
+  if (k !== gwToken) { gwToken = k; gwClient = new Anthropic({ apiKey: null, authToken: k, baseURL: process.env.AI_GATEWAY_URL || 'https://ai-gateway.vercel.sh' }); }
+  return gwClient;
+}
+const anthropicClient = !GATEWAY && (process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN) ? new Anthropic() : null;
 const EFFORT = { quick: 'low', default: 'medium', complex: 'high' };
 
 const err = (code, message) => Object.assign(new Error(message || code), { code });
 
 function mapError(e) {
   if (e && e.code) return e;
+  if (e) console.error('IA:', e.status, String(e.message).slice(0, 300));
   if (e instanceof Anthropic.RateLimitError) return err('rate_limited', 'Límite de uso de la API alcanzado.');
-  if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) return err('sampling_disabled', 'La API key de Anthropic no es válida o no tiene permisos.');
+  if (/free tier/i.test(String(e && e.message))) return err('billing', 'El modelo de IA configurado no está incluido en el plan gratuito de Vercel AI Gateway.');
+  if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) return err('sampling_disabled', 'La credencial de IA del servidor no es válida o no tiene permisos.');
   if (e instanceof Anthropic.BadRequestError) {
     if (/credit balance/i.test(String(e.message))) return err('billing', 'La cuenta de Anthropic de Tita no tiene saldo. Hay que recargar créditos en console.anthropic.com (Billing).');
-    return err('invalid_request', 'Claude rechazó la consulta. Intenta de nuevo.');
+    if (/credit|quota|budget|insufficient/i.test(String(e.message))) return err('billing', 'Se agotaron los créditos gratuitos de IA de este mes. Se renuevan automáticamente; mientras tanto el análisis sigue sin IA.');
+    return err('invalid_request', 'La IA rechazó la consulta. Intenta de nuevo.');
   }
+  if (e instanceof Anthropic.APIError && (e.status === 402 || /credit|quota|budget/i.test(String(e.message)))) return err('billing', 'Se agotaron los créditos gratuitos de IA de este mes. Se renuevan automáticamente; mientras tanto el análisis sigue sin IA.');
   if (e instanceof Anthropic.APIError) return err('upstream_error', 'Error de la API (' + e.status + ').');
   return err('upstream_error', (e && e.message) || 'Error desconocido');
 }
 
 async function call({ messages, system, tools, tier, maxTokens, orgId, userId, kind }) {
-  if (!client) throw err('sampling_disabled', 'Falta configurar ANTHROPIC_API_KEY en el servidor.');
-  const req = {
-    model: MODEL,
-    max_tokens: maxTokens || 16000,
-    messages,
-    output_config: { effort: EFFORT[tier] || 'medium' },
-    betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default',
-  };
+  const client = getClient();
+  if (!client) throw err('sampling_disabled', 'La IA no está configurada en el servidor.');
+  const req = { model: MODEL, max_tokens: maxTokens || 16000, messages };
+  if (!GATEWAY) Object.assign(req, { output_config: { effort: EFFORT[tier] || 'medium' }, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' });
   if (system) req.system = system;
   if (tools && tools.length) req.tools = tools;
   let res;
-  try { res = await client.beta.messages.create(req); } catch (e) { throw mapError(e); }
+  try { res = GATEWAY ? await client.messages.create(req) : await client.beta.messages.create(req); } catch (e) { throw mapError(e); }
   q('insert into ai_usage (org_id, user_id, kind, model, input_tokens, output_tokens) values ($1,$2,$3,$4,$5,$6)', [orgId || null, userId || null, kind || null, res.model, res.usage && res.usage.input_tokens, res.usage && res.usage.output_tokens]).catch(() => {});
-  if (res.stop_reason === 'refusal') throw err('refused', 'Claude no procesó este contenido.');
+  if (res.stop_reason === 'refusal') throw err('refused', 'La IA no procesó este contenido.');
   return res;
 }
 
@@ -78,4 +91,4 @@ async function research(prompt, opts = {}) {
 // Fachada compatible con la interfaz que usan los prompts de ingest.js
 const facade = (ctx) => ({ json: (prompt, o = {}) => json(prompt, { ...ctx, tier: o.modelTier, kind: o.kind || ctx.kind }) });
 
-module.exports = { call, json, research, facade, textOf, configured: () => !!client, MODEL };
+module.exports = { call, json, research, facade, textOf, configured: () => !!getClient(), setOidc, GATEWAY, MODEL };

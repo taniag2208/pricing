@@ -45,6 +45,9 @@ DATABASE_URL=postgres://... SESSION_SECRET=dev ANTHROPIC_API_KEY=... npm start
 npm run test:e2e   # Postgres embebido + tiendas y API de Claude simuladas + navegador
 ```
 
+## IA sin costo (Vercel AI Gateway)
+Con `AI_PROVIDER=gateway` el servidor usa Vercel AI Gateway en lugar de la API de Anthropic. En Vercel se autentica solo (token OIDC del despliegue, sin API key) y consume los créditos gratuitos de AI Gateway que Vercel da cada mes (US$5). El plan gratuito no incluye los modelos Claude, por eso el modelo por defecto en este modo es `google/gemini-2.5-flash` (cambiable con `AI_MODEL`). Fuera de Vercel se usa `AI_GATEWAY_API_KEY`. Para volver a Claude directo: quita `AI_PROVIDER` y define `ANTHROPIC_API_KEY` con saldo.
+
 ## Variables
 Ver `.env.example`. Las más importantes: `DATABASE_URL`, `SESSION_SECRET`, `ANTHROPIC_API_KEY`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `REFRESH_CRON` (por defecto 5:17 a. m. hora de Bogotá), `AI_MODEL`.
 

@@ -100,7 +100,7 @@
       </div>
       <details className="assum"><summary>Supuestos y limitaciones</summary><ul>
         <li>El estimado refleja lo que cobra el mercado por atributos similares (regresión hedónica log-lineal entrenada con precios de lista de tus competidores). No mide disposición a pagar ni es el precio que maximiza utilidad.</li>
-        <li>Los atributos fueron calificados por Claude desde el nombre y la ficha publicada; ${d.comps.filter((c) => c.q.conf === 'baja').length} de ${d.comps.length} comparables tienen confianza baja.</li>
+        <li>Los atributos fueron calificados por la IA desde el nombre y la ficha publicada; ${d.comps.filter((c) => c.q.conf === 'baja').length} de ${d.comps.length} comparables tienen confianza baja.</li>
         <li>${hasCost ? 'El efecto en volumen no se estima aquí: usa Promotion Optimizer o Revenue Learning.' : 'Sin costo no se evalúa margen.'}</li>
         ${study ? html`<li>Incluye el rango aceptable declarado del estudio Pulse «${study.name}» (respuestas de encuesta, no ventas).</li>` : null}
       </ul></details>
@@ -131,7 +131,7 @@
         <section className="panel"><h2>¿Qué atributos explican las diferencias de precio?</h2><${UI.Coefs} coef=${m.coef} />
           ${top.length ? html`<p className="insight"><${Icon} n="spark" />En ${cat.name.toLowerCase()}, cada nivel adicional de <b>${top[0].attr.name.toLowerCase()}</b> se asocia con ${TP.pct(top[0].pct, 0)} en el precio de mercado${top[1] ? html`, seguido de ${top[1].attr.name.toLowerCase()} (${TP.pct(top[1].pct, 0)})` : ''}.</p>` : null}</section>
         <section className="panel"><h2>Cómo se calcula</h2><p className="formula">ln(Precio) = β₀ + Σ βᵢ × Nivelᵢ</p>
-          <ul className="plain"><li>Entrenado con precios <b>de lista</b> de los ${E.cfg.comps.length} competidores activos (los filtros de vista no cambian el modelo).</li><li>Niveles 1 a 5 calificados por Claude con la rúbrica de la categoría y corregidos por tu equipo; ${m.k} atributos activos. Los niveles sin evidencia se imputan con la mediana de la categoría.</li><li>Atípicos excluidos por residuo mayor a 3,5 desviaciones robustas${m.excluded.length ? ': ' + m.excluded.slice(0, 6).map((p) => A.brandName(E, p.brand) + ' ' + p.name).join(', ') : ''}.</li><li>Banda P10–P90 a partir de los errores de validación cruzada.</li><li>Abstención automática si la muestra es menor a ${m.need} o el R² de validación es menor a 0,50.</li></ul>
+          <ul className="plain"><li>Entrenado con precios <b>de lista</b> de los ${E.cfg.comps.length} competidores activos (los filtros de vista no cambian el modelo).</li><li>Niveles 1 a 5 calificados por la IA con la rúbrica de la categoría y corregidos por tu equipo; ${m.k} atributos activos. Los niveles sin evidencia se imputan con la mediana de la categoría.</li><li>Atípicos excluidos por residuo mayor a 3,5 desviaciones robustas${m.excluded.length ? ': ' + m.excluded.slice(0, 6).map((p) => A.brandName(E, p.brand) + ' ' + p.name).join(', ') : ''}.</li><li>Banda P10–P90 a partir de los errores de validación cruzada.</li><li>Abstención automática si la muestra es menor a ${m.need} o el R² de validación es menor a 0,50.</li></ul>
           <p className="muted sm">Se recalcula en tu navegador cada vez que cambian catálogos, clasificaciones, equivalencias, competidores o atributos.</p></section>
       </div></div>`;
   }
@@ -187,12 +187,12 @@
     const posBand = price ? TP.bandOf(price, b) : null;
     const suggest = async () => {
       const sample = await I.sample();
-      if (!sample || !s.img) { setErr(!s.img ? 'Carga primero una imagen.' : 'Claude no está disponible en esta vista.'); return; }
+      if (!sample || !s.img) { setErr(!s.img ? 'Carga primero una imagen.' : 'La IA no está disponible en esta vista.'); return; }
       ctl.current = new AbortController(); setBusy(true); setErr('');
       try {
         const o = await I.levelsFromImage(sample, cat, s.img.file, s.desc, ctl.current.signal);
         const pickL = (v, list) => list.find((x) => TP.strip(x) === TP.strip(String(v || ''))) || null;
-        setS((x) => ({ ...x, typ: pickL(o.typ, cat.typologies) || x.typ, mat: pickL(o.mat, cat.materials) || x.mat, lv: cat.attrs.map((_, j) => { const v = Array.isArray(o.lv) ? Number(o.lv[j]) : NaN; return v >= 1 && v <= 5 ? Math.round(v) : x.lv[j]; }), sug: String(o.ev || 'Niveles sugeridos por Claude a partir de la imagen.') }));
+        setS((x) => ({ ...x, typ: pickL(o.typ, cat.typologies) || x.typ, mat: pickL(o.mat, cat.materials) || x.mat, lv: cat.attrs.map((_, j) => { const v = Array.isArray(o.lv) ? Number(o.lv[j]) : NaN; return v >= 1 && v <= 5 ? Math.round(v) : x.lv[j]; }), sug: String(o.ev || 'Niveles sugeridos por la IA a partir de la imagen.') }));
       } catch (e) { if (e.code !== 'cancelled') setErr(I.errText(e)); }
       setBusy(false);
     };
@@ -205,8 +205,8 @@
           <${Select} id="ln-cat" label="Categoría" value=${cid} onChange=${changeCat} options=${E.cats.map((c) => ({ v: c.id, l: c.name }))} />
           <div className="imgin">${s.img ? html`<img src=${s.img.url} alt="Imagen cargada del producto" />` : html`<div className="ph-img"><${Icon} n="upload" s=${20} /><span>Foto o render</span></div>`}
             <div><label className="btn sm" htmlFor="ln-img">${s.img ? 'Cambiar imagen' : 'Cargar imagen'}</label><input id="ln-img" type="file" accept="image/jpeg,image/png,image/webp" className="sr" onChange=${onImg} />
-            ${busy ? html`<span className="spin"></span><button type="button" className="btn sm" onClick=${() => ctl.current && ctl.current.abort()}>Detener</button>` : html`<button type="button" className="btn sm" disabled=${!s.img || !P.write} title=${P.write ? '' : 'Disponible en la versión con cuenta'} onClick=${suggest}><${Icon} n="spark" />Sugerir atributos con Claude</button>`}
-            <p className="muted sm">${s.sug ? html`<b>Claude:</b> ${s.sug} ` : 'Claude mira la imagen y la descripción y propone tipo, material y niveles. Revisa y ajusta antes de usarlos.'}</p></div></div>
+            ${busy ? html`<span className="spin"></span><button type="button" className="btn sm" onClick=${() => ctl.current && ctl.current.abort()}>Detener</button>` : html`<button type="button" className="btn sm" disabled=${!s.img || !P.write} title=${P.write ? '' : 'Disponible en la versión con cuenta'} onClick=${suggest}><${Icon} n="spark" />Sugerir atributos con IA</button>`}
+            <p className="muted sm">${s.sug ? html`<b>IA:</b> ${s.sug} ` : 'La IA mira la imagen y la descripción y propone tipo, material y niveles. Revisa y ajusta antes de usarlos.'}</p></div></div>
           ${err ? html`<div className="err">${err}</div>` : null}
           <label className="fld" htmlFor="ln-desc"><span>Descripción (opcional)</span><textarea id="ln-desc" rows="2" value=${s.desc} onInput=${(e) => set('desc', e.target.value)} placeholder="Materiales, construcción, uso…"></textarea></label>
           <div className="two"><${Select} id="ln-typ" label="Tipo" value=${s.typ} onChange=${(v) => set('typ', v)} options=${cat.typologies.map((t) => ({ v: t, l: t }))} /><${Select} id="ln-mat" label="Material" value=${s.mat} onChange=${(v) => set('mat', v)} options=${cat.materials.map((t) => ({ v: t, l: t }))} /></div>
@@ -448,8 +448,8 @@
         <tr><td><b>Administrador Tita</b></td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr><tr><td><b>Administrador del cliente</b></td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>—</td></tr><tr><td><b>Analista</b></td><td>✓</td><td>✓</td><td>—</td><td>—</td><td>—</td></tr><tr><td><b>Lectura</b></td><td>✓</td><td>—</td><td>—</td><td>—</td><td>—</td></tr></tbody></table></div>
         <p className="muted sm">Los permisos se validan en el servidor; ocultar un botón no es la única protección.</p></section>`,
       acerca: html`<div className="grid-2">
-        <section className="panel"><h2><${Badge} tone="ok">Automático<//></h2><ul className="plain"><li>Lectura de catálogos públicos (Shopify, WooCommerce, VTEX) respetando robots.txt, y actualización diaria con registro de cambios de precio</li><li>Mapeo de etiquetas y clasificación de atributos con Claude en segundo plano, con evidencia; los dudosos van a revisión</li><li>Homologación, comparables, modelo hedónico con validación cruzada y abstención, diagnóstico y vistas de mercado</li><li>Copiloto con Claude sobre los datos de la cuenta</li></ul></section>
-        <section className="panel"><h2><${Badge} tone="warn">Manual en esta versión<//></h2><ul className="plain"><li>Tiendas sin catálogo público: importación por archivo o por texto de página (Claude extrae los productos)</li><li>Costos, rotación y ventas: carga de archivos CSV o Excel</li><li>Precios aprobados: archivo CSV para cargar en el ERP o la tienda</li><li>Encuestas Pulse: se distribuyen con la herramienta del cliente y se importan</li><li>Fotos de la competencia: la clasificación usa nombre y ficha</li></ul></section></div>`,
+        <section className="panel"><h2><${Badge} tone="ok">Automático<//></h2><ul className="plain"><li>Lectura de catálogos públicos (Shopify, WooCommerce, VTEX) respetando robots.txt, y actualización diaria con registro de cambios de precio</li><li>Mapeo de etiquetas y clasificación de atributos con IA en segundo plano, con evidencia; los dudosos van a revisión</li><li>Homologación, comparables, modelo hedónico con validación cruzada y abstención, diagnóstico y vistas de mercado</li><li>Copiloto con IA sobre los datos de la cuenta</li></ul></section>
+        <section className="panel"><h2><${Badge} tone="warn">Manual en esta versión<//></h2><ul className="plain"><li>Tiendas sin catálogo público: importación por archivo o por texto de página (la IA extrae los productos)</li><li>Costos, rotación y ventas: carga de archivos CSV o Excel</li><li>Precios aprobados: archivo CSV para cargar en el ERP o la tienda</li><li>Encuestas Pulse: se distribuyen con la herramienta del cliente y se importan</li><li>Fotos de la competencia: la clasificación usa nombre y ficha</li></ul></section></div>`,
     };
     return html`<div className="page"><header className="ph"><div><div className="eyebrow">Configuration</div><h1>Configuración</h1><p>Lo que el negocio define y el sistema usa. Todo cambio se guarda para el equipo y recalcula el análisis.</p></div></header>
       <nav className="tabs">${SUB.map(([k, l]) => html`<button key=${k} type="button" className=${sub === k ? 'on' : ''} onClick=${() => setSub(k)}>${l}</button>`)}</nav>

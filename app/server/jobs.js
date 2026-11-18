@@ -101,7 +101,7 @@ const RUN = {
       catch (e) { if (e.code === 'invalid_json' && keyed.length > 5) { res = await I.classifyBatch(ai.facade({ orgId: org, userId: job.created_by, kind: 'classify' }), cats, keyed.slice(0, Math.ceil(keyed.length / 2))); } else throw e; }
       const out = {};
       batch.forEach((p) => { if (res[p.pid]) out[p.pid] = res[p.pid]; });
-      if (!Object.keys(out).length) throw new Error('Claude no devolvió clasificaciones para el lote.');
+      if (!Object.keys(out).length) throw new Error('La IA no devolvió clasificaciones para el lote.');
       await store.put(org, 'cls', 'b-' + Date.now(), { at: new Date().toISOString(), by: 'sistema', items: out }, 'sistema');
       batches++; total += Object.keys(out).length; low += Object.values(out).filter((x) => x.conf === 'baja').length; none += Object.values(out).filter((x) => !x.cat).length;
       await progress(job.id, { done: total, left: queue.length - Object.keys(out).length, batches, low, none });
@@ -198,7 +198,7 @@ const RUN = {
           const out = {}; batches[i].forEach((p) => { if (results[i].value[p.id]) out[p.id] = results[i].value[p.id]; });
           if (Object.keys(out).length) { await store.put(org, 'cls', 'b-' + Date.now() + '-' + i, { at: new Date().toISOString(), by: 'sistema', items: out }, 'sistema'); wrote++; }
         }
-        if (!wrote) throw new Error('Claude no pudo clasificar los productos. Intenta de nuevo en unos minutos.');
+        if (!wrote) throw new Error('La IA no pudo clasificar los productos. Intenta de nuevo en unos minutos.');
       }
       const cfg = await store.get(org, 'ws', 'config');
       await store.put(org, 'ws', 'config', { ...cfg, setupDone: true }, 'sistema');
@@ -236,7 +236,7 @@ async function step(org) {
     if (result && result.partial) await q("update jobs set status = 'queued', lease_until = null, updated_at = now() where id = $1", [job.id]);
     else await q("update jobs set status = 'done', lease_until = null, progress = progress || $2, updated_at = now() where id = $1", [job.id, { result }]);
   } catch (e) {
-    const msg = e && e.code === 'billing' ? 'El análisis no pudo usar Claude: la cuenta de Anthropic de Tita no tiene saldo. Avísale al equipo de Tita.' : String((e && (e.message || e.code)) || e);
+    const msg = String((e && (e.message || e.code)) || e);
     await q("update jobs set status = 'failed', lease_until = null, error = $2, updated_at = now() where id = $1", [job.id, msg.slice(0, 500)]);
     if (job.type === 'ingest' && job.params.sid) { const s = await store.get(job.org_id, 'stores', job.params.sid).catch(() => null); if (s) await store.put(job.org_id, 'stores', job.params.sid, { ...s, lastError: e.message, lastAttempt: new Date().toISOString() }, 'sistema').catch(() => {}); }
   }

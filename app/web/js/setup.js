@@ -18,7 +18,7 @@
     if (job.type === 'ingest') detail = live ? (p.items ? p.items + ' productos leídos (' + (p.platform || '') + ', página ' + p.pages + ')' : 'Conectando con la tienda…') : r.items != null ? r.items + ' productos · ' + r.platform + (r.priceChanges ? ' · ' + r.priceChanges + ' cambios de precio' : '') : '';
     else if (job.type === 'classify') detail = (p.done != null ? p.done + ' clasificados' : 'Preparando…') + (p.left != null ? ' · ' + p.left + ' en cola' : '') + (p.low ? ' · ' + p.low + ' con confianza baja' : '');
     else if (job.type === 'map') detail = p.labels != null ? p.labels + ' de ' + p.total + ' etiquetas' : r.labels != null ? r.labels + ' etiquetas mapeadas' : '';
-    else if (job.type === 'propose') detail = r.categories != null ? r.categories + ' categorías propuestas' : 'Claude está leyendo el catálogo (1 a 3 minutos)…';
+    else if (job.type === 'propose') detail = r.categories != null ? r.categories + ' categorías propuestas' : 'La IA está leyendo el catálogo (1 a 3 minutos)…';
     else if (job.type === 'refresh') detail = p.stores != null ? p.stores + ' tiendas actualizadas' : '';
     return html`<div className=${'jobline j-' + job.status}>${live ? html`<span className="spin"></span>` : html`<${Icon} n=${job.status === 'done' ? 'check' : 'alert'} s=${14} />`}<span><b>${L.JOB[job.type]}</b> · ${{ queued: 'en cola', running: 'en curso', done: 'terminado', failed: 'falló' }[job.status]}${detail ? ' · ' + detail : ''}${job.status === 'failed' && job.error ? html`<br /><span className="err">${job.error}</span>` : null}</span><span className="muted sm">${new Date(job.updated_at || job.created_at).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}</span></div>`;
   };
@@ -40,9 +40,9 @@
     const process = () => { const r = I.parseText(text, origin); if (r.format === 'text') { setRes(null); setErr(''); setBusy('need-ai'); return; } setBusy(''); take(r); };
     const ai = async () => {
       const sample = await I.sample();
-      if (!sample) { setErr('Claude no está disponible en esta vista. Usa el JSON de la plataforma o un archivo CSV/Excel.'); return; }
+      if (!sample) { setErr('La IA no está disponible en esta vista. Usa el JSON de la plataforma o un archivo CSV/Excel.'); return; }
       ctl.current = new AbortController(); setBusy('ai'); setErr('');
-      try { const items = await I.extractFromText(sample, text, origin, ctl.current.signal); take({ format: 'Página (extraído con Claude)', items }); setBusy(''); }
+      try { const items = await I.extractFromText(sample, text, origin, ctl.current.signal); take({ format: 'Página (extraído con IA)', items }); setBusy(''); }
       catch (e) { setBusy('need-ai'); if (e.code !== 'cancelled') setErr(I.errText(e)); }
     };
     const onFile = async (e) => {
@@ -71,12 +71,12 @@
       <details className="manual"><summary className="sm">Importación manual (si la tienda no publica un catálogo leíble)</summary>
       ${origin ? html`<div className="implinks"><b>1. Abre el catálogo público de ${I.hostOf(origin)}</b><p className="muted sm">Abre el enlace de la plataforma de la tienda (los demás mostrarán un error). Si ves texto con productos, selecciónalo todo (Ctrl+A), cópialo y pégalo abajo. Repite con page=2, 3… para catálogos grandes.</p>
         <ul>${I.links(origin).map((l) => html`<li key=${l.platform}><a href=${l.url} target="_blank" rel="noopener noreferrer">${l.platform}<${Icon} n="link" s=${13} /></a><span className="muted sm">${l.note}</span></li>`)}</ul>
-        <p className="muted sm">¿Otra plataforma? Abre una página de categoría de la tienda, copia todo el texto y pégalo: Claude extrae los productos.</p></div>` : null}
+        <p className="muted sm">¿Otra plataforma? Abre una página de categoría de la tienda, copia todo el texto y pégalo: la IA extrae los productos.</p></div>` : null}
       <div className="impbox">
         <label className="fld" htmlFor=${'imp-t-' + sid}><span>${origin ? '2. ' : ''}Pega aquí el contenido (JSON, CSV o texto de la página)</span><textarea id=${'imp-t-' + sid} rows="5" value=${text} onInput=${(e) => { setText(e.target.value); setBusy(''); }} disabled=${ro} placeholder='{"products":[…]}  ·  nombre;precio;categoria;…  ·  texto de una página de categoría'></textarea></label>
         <div className="mapact"><button type="button" className="btn sm primary" disabled=${ro || !text.trim() || busy === 'ai'} onClick=${process}>Procesar</button><span className="muted sm">o</span><label className=${'btn sm ' + (ro ? 'disabled' : '')} htmlFor=${'imp-f-' + sid}><${Icon} n="upload" />Subir archivo (CSV, Excel, JSON)</label><input id=${'imp-f-' + sid} type="file" accept=".csv,.tsv,.txt,.json,.xlsx,.xls" className="sr" disabled=${ro} onChange=${onFile} /></div>
-        ${busy === 'need-ai' || busy === 'ai' ? html`<${Note}>No es un JSON de plataforma ni un CSV. Claude puede leer el texto y extraer nombre, precio, precio tachado y categoría de cada producto.
-          <div className="mapact mt6">${busy === 'ai' ? html`<span className="spin"></span><span className="sm">Extrayendo productos…</span><button type="button" className="btn sm" onClick=${() => ctl.current && ctl.current.abort()}>Detener</button>` : html`<button type="button" className="btn sm primary" onClick=${ai}><${Icon} n="spark" />Extraer con Claude</button>`}</div><//>` : null}
+        ${busy === 'need-ai' || busy === 'ai' ? html`<${Note}>No es un JSON de plataforma ni un CSV. La IA puede leer el texto y extraer nombre, precio, precio tachado y categoría de cada producto.
+          <div className="mapact mt6">${busy === 'ai' ? html`<span className="spin"></span><span className="sm">Extrayendo productos…</span><button type="button" className="btn sm" onClick=${() => ctl.current && ctl.current.abort()}>Detener</button>` : html`<button type="button" className="btn sm primary" onClick=${ai}><${Icon} n="spark" />Extraer con IA</button>`}</div><//>` : null}
         ${err ? html`<div className="err" role="alert">${err}</div>` : null}
         ${res ? html`<div className="preview"><div className="row-between"><b>${res.items.length} productos detectados · formato ${res.format}</b>${existing.length ? html`<${Seg} size="sm" label="Modo" value=${mode} onChange=${setMode} options=${[{ v: 'add', l: 'Agregar a los ' + existing.length + ' actuales' }, { v: 'replace', l: 'Reemplazar catálogo' }]} />` : null}</div>
           <div className="tw"><table className="tbl"><thead><tr><th>Producto</th><th>Etiqueta</th><th className="num">Precio lista</th><th className="num">Promoción</th></tr></thead><tbody>${res.items.slice(0, 6).map((p) => html`<tr key=${p.id}><td>${p.name}</td><td>${p.label}</td><td className="num">${p.price.toLocaleString('es-CO')}</td><td className="num">${p.promo ? p.promo.toLocaleString('es-CO') : '—'}</td></tr>`)}</tbody></table></div>
@@ -160,11 +160,11 @@
     const [edit, setEdit] = useState({});
     const saveOne = async (c) => { const { _open, _on, ...rest } = c; await L.set('cats/' + c.id, rest); setEdit((e) => ({ ...e, [c.id]: undefined })); };
     return html`<div className="studio">
-      ${draft ? html`<section className="panel"><div className="row-between"><h2>Propuesta de Claude: ${draft.length} categorías</h2><span className="muted sm">Revisa nombres, tipos y niveles. Desmarca las que no quieras analizar.</span></div>
+      ${draft ? html`<section className="panel"><div className="row-between"><h2>Propuesta de la IA: ${draft.length} categorías</h2><span className="muted sm">Revisa nombres, tipos y niveles. Desmarca las que no quieras analizar.</span></div>
           ${draft.map((c, i) => html`<div key=${c.id} className="drow"><label className="tgl" htmlFor=${'dr-' + c.id}><input id=${'dr-' + c.id} type="checkbox" checked=${c._on} onChange=${(e) => setDraft(draft.map((x, k) => (k === i ? { ...x, _on: e.target.checked } : x)))} />Analizar</label><${CatEditor} c=${c} ro=${ro} onChange=${(n) => setDraft(draft.map((x, k) => (k === i ? n : x)))} /></div>`)}
           <div className="mapact"><button type="button" className="btn primary" disabled=${ro || !draft.some((c) => c._on)} onClick=${saveDraft}>Guardar categorías seleccionadas</button><button type="button" className="btn ghost" onClick=${() => setDraft(null)}>Descartar propuesta</button></div></section>`
-        : html`<section className="panel"><div className="row-between"><div><h2>${saved.length ? 'Categorías de análisis' : 'Crea tus categorías con IA'}</h2><p className="muted">${saved.length ? 'Puedes editar nombres, tipos, materiales, colores y niveles de cada rúbrica.' : 'Claude lee tu catálogo y el de la competencia y propone categorías comparables, cada una con su rúbrica de atributos de 5 niveles. Tú decides cuáles quedan.'}</p></div>
-          <button type="button" className=${'btn ' + (saved.length ? 'sm' : 'primary')} disabled=${ro || !ownN || plive} onClick=${propose}><${Icon} n="spark" />${plive ? 'Claude está trabajando…' : saved.length ? 'Proponer de nuevo' : 'Proponer categorías y rúbricas'}</button></div>
+        : html`<section className="panel"><div className="row-between"><div><h2>${saved.length ? 'Categorías de análisis' : 'Crea tus categorías con IA'}</h2><p className="muted">${saved.length ? 'Puedes editar nombres, tipos, materiales, colores y niveles de cada rúbrica.' : 'La IA lee tu catálogo y el de la competencia y propone categorías comparables, cada una con su rúbrica de atributos de 5 niveles. Tú decides cuáles quedan.'}</p></div>
+          <button type="button" className=${'btn ' + (saved.length ? 'sm' : 'primary')} disabled=${ro || !ownN || plive} onClick=${propose}><${Icon} n="spark" />${plive ? 'La IA está trabajando…' : saved.length ? 'Proponer de nuevo' : 'Proponer categorías y rúbricas'}</button></div>
           <${A.JobLine} job=${pjob} />
           ${!ownN ? html`<${Note} tone="warn">Primero importa el catálogo de tu tienda.<//>` : null}
           ${err ? html`<div className="err">${err}</div>` : null}
@@ -195,7 +195,7 @@
     const setMap = (key, v) => L.set('labelmap/manual', { at: nowIso(), items: { ...((ws.labelmap.manual || {}).items || {}), [key]: v === '_none' ? null : v } });
     if (!cats.length) return html`<${Empty} title="Primero define las categorías">La clasificación usa las rúbricas de las categorías activas.<//>`;
     return html`<div className="clsp">
-      <section className="panel"><div className="row-between"><div><h2>Clasificación con Claude</h2><p className="muted">El servidor mapea las etiquetas de cada tienda a tus categorías (por uso, no por nombre) y clasifica cada producto: categoría, tipo, material, color y nivel 1–5 por atributo, con una cita de evidencia. Corre en segundo plano y se repite cada día con los productos nuevos.</p></div>
+      <section className="panel"><div className="row-between"><div><h2>Clasificación con IA</h2><p className="muted">El servidor mapea las etiquetas de cada tienda a tus categorías (por uso, no por nombre) y clasifica cada producto: categoría, tipo, material, color y nivel 1–5 por atributo, con una cita de evidencia. Corre en segundo plano y se repite cada día con los productos nuevos.</p></div>
         <div className="mapact"><button type="button" className="btn" disabled=${ro || !unmapped.length || live(mj) || live(cj)} onClick=${() => L.runJob('map')}>${unmapped.length ? 'Solo mapear ' + unmapped.length + ' etiquetas' : 'Etiquetas mapeadas'}</button><button type="button" className="btn primary" disabled=${ro || live(cj) || (!queue.length && !unmapped.length)} onClick=${() => L.runJob('classify')}><${Icon} n="spark" />${live(cj) ? 'Clasificando…' : 'Clasificar todo'}</button></div></div>
         <div className="progress"><div className="pbar"><i style=${{ width: (relevant ? Math.min(100, (done / relevant) * 100) : 0) + '%' }}></i></div><span><b>${done}</b> de ${relevant || done} productos relevantes clasificados · ${queue.length} en cola${unmapped.length ? ' · ' + unmapped.length + ' etiquetas sin mapear (sus productos entran al mapearlas)' : ''}</span></div>
         <${A.JobLine} job=${mj} /><${A.JobLine} job=${cj} />
@@ -321,7 +321,7 @@
     return html`<div className="ob"><div className="ob-in wide">
       <div className="brandmark"><span className="logo">T</span>TITA Pricing Intelligence <b>360°</b></div>
       <div className="eyebrow">Configuración de la cuenta · ${orgName || ''}</div>
-      ${step === 0 ? html`<h1>Configura la cuenta del cliente</h1><p className="lead">Registra la tienda del cliente y sus competidores. El servidor importa los catálogos, Claude propone categorías y clasifica los atributos, y cuando todo esté revisado publicas la cuenta para el cliente.</p>` : html`<h2>${steps[step]}</h2>`}
+      ${step === 0 ? html`<h1>Configura la cuenta del cliente</h1><p className="lead">Registra la tienda del cliente y sus competidores. El servidor importa los catálogos, la IA propone categorías y clasifica los atributos, y cuando todo esté revisado publicas la cuenta para el cliente.</p>` : html`<h2>${steps[step]}</h2>`}
 
       ${stepper}${body}</div></div>`;
   };
