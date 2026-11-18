@@ -7,25 +7,28 @@
   const A = (TP.app = {});
 
   /* ---------- motor: todo el análisis se recalcula desde cfg + decisiones ---------- */
-  const dsCache = {}, hCache = new WeakMap();
-  A.dataset = (cfg) => { const k = cfg.vertical + '|' + cfg.market + '|' + cfg.host; return dsCache[k] || (dsCache[k] = TP.buildDataset(cfg)); };
-  A.policyOf = (cfg) => ({ ...cfg.policy, useCost: !!cfg.privateData });
-  A.compute = function (cfg, dec) {
-    const D = A.dataset(cfg);
+  const hCache = new WeakMap();
+  A.policyOf = (cfg) => ({ ...cfg.policy, useCost: true });
+  A.compute = function (D, cfg, dec) {
     let H = hCache.get(D); if (!H) { H = TP.homologate(D); hCache.set(D, H); }
-    const E = { D, H, cfg, dec, mk: D.mk, cats: D.cats.filter((c) => cfg.cats.includes(c.id)), pool: {}, own: {}, model: {}, band: {}, diag: {} };
+    const comps = cfg.comps.filter((b) => D.brandById[b]);
+    const cfg2 = { ...cfg, comps };
+    const E = { D, H, cfg: cfg2, dec, mk: D.mk, cats: D.cats.filter((c) => cfg.cats.includes(c.id)), pool: {}, own: {}, model: {}, band: {}, diag: {} };
     const pol = A.policyOf(cfg);
     E.cats.forEach((c) => {
-      const pool = TP.categoryPool(D, H, c.id, cfg.comps, dec.map);
+      const pool = TP.categoryPool(D, H, c.id, comps, dec.map);
       const own = D.products.filter((p) => p.brand === 'own' && p.cat === c.id);
       const on = c.attrs.filter((a) => !(cfg.attrsOff[c.id] || []).includes(a.id)).map((a) => a.id);
-      const model = TP.fitModel(c, pool, on);
+      const model = pool.length ? TP.fitModel(c, pool, on) : { ok: false, reason: 'muestra', n: 0, need: TP.minSample(on.length), k: on.length, nRaw: 0 };
       E.pool[c.id] = pool; E.own[c.id] = own; E.model[c.id] = model;
-      E.band[c.id] = TP.bands(pool, cfg.franjas[c.id]);
+      E.band[c.id] = pool.length ? TP.bands(pool, cfg.franjas[c.id]) : TP.bands(own.length ? own : [{ list: 1 }], cfg.franjas[c.id]);
       E.diag[c.id] = own.map((p) => TP.diagnose(c, model, p, TP.comparablesFor(c, p, pool, dec.comp), pol, D.mk));
     });
+    E.cats = E.cats.filter((c) => E.own[c.id].length);
     E.allDiag = E.cats.flatMap((c) => E.diag[c.id].map((d) => ({ ...d, cat: c })));
-    E.pendingMaps = H.filter((h) => cfg.cats.includes(h.cat) && cfg.comps.includes(h.brand) && h.status !== 'equiv' && !dec.map[h.key]).length;
+    E.pendingMaps = H.filter((h) => cfg.cats.includes(h.cat) && comps.includes(h.brand) && h.status !== 'equiv' && !dec.map[h.key]).length;
+    E.hasCost = D.products.some((p) => p.brand === 'own' && p.cost > 0);
+    E.hasUnits = D.products.some((p) => p.brand === 'own' && p.cost > 0 && p.units > 0);
     return E;
   };
   A.brandName = (E, id) => (E.D.brandById[id] || { name: id }).name;
@@ -82,162 +85,6 @@
     };
   };
 
-  A.Onboarding = function ({ initial, onDone }) {
-    const [step, setStep] = useState(0);
-    const [url, setUrl] = useState(initial ? initial.url : '');
-    const [err, setErr] = useState('');
-    const [det, setDet] = useState(null);
-    const [scan, setScan] = useState(0);
-    const [ans, setAns] = useState(null);
-    const [proc, setProc] = useState(0);
-    const [csv, setCsv] = useState(null);
-    const [authReq, setAuthReq] = useState(false);
-    const reduce = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-    const start = (u) => {
-      const d = TP.detectFromUrl(u != null ? u : url);
-      if (!d) { setErr('Escribe una dirección válida, por ejemplo mitienda.com o https://www.mitienda.com.co'); return; }
-      setErr(''); if (u != null) setUrl(u); setDet(d); setStep(1); setScan(0);
-    };
-    useEffect(() => {
-      if (step !== 1 || !det) return;
-      if (scan >= 4) return;
-      const t = setTimeout(() => setScan(scan + 1), reduce ? 0 : 380);
-      return () => clearTimeout(t);
-    }, [step, scan, det]);
-
-    const D0 = useMemo(() => (det ? A.dataset({ vertical: det.vertical, market: det.market, host: det.host, storeName: det.name }) : null), [det]);
-    const disc = useMemo(() => {
-      if (!D0) return null;
-      const own = D0.products.filter((p) => p.brand === 'own');
-      return {
-        n: own.length, variants: own.length + Math.round(own.length * 1.6), promo: own.filter((p) => p.promo).length,
-        desc: own.filter((p) => p.hasDesc).length / own.length, mat: own.filter((p) => p.matPublic).length / own.length,
-        cats: D0.cats.map((c) => ({ c, n: own.filter((p) => p.cat === c.id).length, typs: c.typologies.length })),
-      };
-    }, [D0]);
-
-    const goQuestions = () => {
-      const D = D0;
-      const counts = D.brands.filter((b) => !b.own).map((b) => ({ b, n: D.products.filter((p) => p.brand === b.id && p.cat).length })).sort((a, b) => b.n - a.n);
-      setAns({ market: det.market, objective: 'competitividad', compMode: 'ia', comps: counts.slice(0, 6).map((x) => x.b.id), cats: D.cats.map((c) => c.id), counts });
-      setStep(2);
-    };
-    const cfgFromAns = () => ({
-      url: det.url, host: det.host, storeName: det.name, platform: det.platform, vertical: det.vertical, market: ans.market,
-      objective: ans.objective, comps: ans.compMode === 'ia' ? ans.counts.slice(0, 6).map((x) => x.b.id) : ans.comps, cats: ans.cats,
-      attrsOff: {}, franjas: {}, policy: { minMargin: 0.55, promoMinMargin: 0.35, rounding: 'psico', maxChange: 0.12 }, privateData: false, role: 'pricing', measured: null,
-    });
-    const preview = useMemo(() => (step >= 3 && ans ? A.compute(cfgFromAns(), { map: {}, comp: {} }) : null), [step, ans]);
-    useEffect(() => {
-      if (step !== 3) return;
-      if (proc > STEPS.length) return;
-      const t = setTimeout(() => setProc(proc + 1), reduce ? 0 : 520);
-      return () => clearTimeout(t);
-    }, [step, proc]);
-
-    const readCsv = (e) => {
-      const file = e.target.files && e.target.files[0]; if (!file) return;
-      const fr = new FileReader();
-      fr.onload = () => { const lines = String(fr.result).split(/\r?\n/).filter((l) => l.trim()); const sep = (lines[0] || '').includes(';') ? ';' : ','; setCsv({ name: file.name, rows: Math.max(0, lines.length - 1), cols: (lines[0] || '').split(sep).map((s) => s.trim()).filter(Boolean) }); };
-      fr.readAsText(file.slice(0, 2e6));
-    };
-
-    const stepper = html`<ol className="ob-steps" aria-label="Progreso">${['Conectar tienda', 'Descubrimiento', 'Preguntas mínimas', 'Análisis automático'].map((s, i) => html`<li key=${i} className=${i === step ? 'cur' : i < step ? 'done' : ''}><span>${i < step ? html`<${Icon} n="check" s=${12} />` : i + 1}</span>${s}</li>`)}</ol>`;
-
-    if (step === 0)
-      return html`<div className="ob"><div className="ob-in">
-        <div className="brandmark"><span className="logo">T</span>TITA Pricing Intelligence <b>360°</b></div>
-        <h1>Descubre oportunidades de rentabilidad en tu catálogo.</h1>
-        <p className="lead">Conecta tu tienda y deja que nuestra inteligencia artificial analice tus productos, entienda tu mercado y te ayude a tomar mejores decisiones de precios.</p>
-        ${stepper}
-        <form className="urlform" onSubmit=${(e) => { e.preventDefault(); start(); }}>
-          <label htmlFor="ob-url">Dirección de tu tienda online</label>
-          <div className="urlrow"><${Icon} n="store" /><input id="ob-url" type="text" inputMode="url" autoComplete="url" placeholder="https://mitienda.com" value=${url} onInput=${(e) => setUrl(e.target.value)} /><button className="btn primary" type="submit">Analizar tienda<${Icon} n="arrow" /></button></div>
-          ${err ? html`<div className="err" role="alert">${err}</div>` : null}
-          <div className="hint">Compatible con Shopify, VTEX, WooCommerce, Magento y tiendas propias. ¿Sin URL a mano? Prueba una demo:
-            <button type="button" className="linkbtn" onClick=${() => start('atelier-norte.co')}>moda y marroquinería</button> ·
-            <button type="button" className="linkbtn" onClick=${() => start('casaviento.com.mx')}>hogar y muebles</button></div>
-        </form>
-        <${Note}>Este es un prototipo: no visita tu sitio. Con cualquier URL genera un catálogo y una competencia <b>de demostración</b>, siempre iguales para la misma dirección, para que puedas recorrer la experiencia completa.<//>
-      </div></div>`;
-
-    if (step === 1)
-      return html`<div className="ob"><div className="ob-in wide">
-        ${stepper}
-        <div className="ob-head"><h2>Esto es lo que encontramos en <span className="mono">${det.host}</span></h2><${SimTag}>Descubrimiento simulado · datos de demostración<//></div>
-        <div className="scan">${['Detectando plataforma', 'Leyendo el catálogo público', 'Extrayendo precios, imágenes y fichas', 'Midiendo la calidad de los datos'].map((s, i) => html`<div key=${i} className=${'scanrow ' + (scan > i ? 'done' : scan === i ? 'run' : '')}><span className="st">${scan > i ? html`<${Icon} n="check" s=${12} />` : ''}</span>${s}</div>`)}</div>
-        ${scan >= 4 ? html`<div className="disc">
-          <div className="kv"><div><span>Tienda</span><b>${det.name}</b></div><div><span>Plataforma</span><b>${det.platform}</b></div><div><span>País y moneda</span><b>${TP.MARKETS[det.market].name} · ${TP.MARKETS[det.market].currency}</b>${!det.tldKnown ? html`<small>Supuesto: confírmalo en el siguiente paso</small>` : null}</div><div><span>Productos</span><b>${disc.n} productos · ${disc.variants} variantes</b></div></div>
-          <div className="cols2">
-            <div><h3>Categorías del catálogo</h3><ul className="clist">${disc.cats.map((x) => html`<li key=${x.c.id}><span>${x.c.name}</span><span className="muted">${x.n} productos · ${x.typs} tipologías</span></li>`)}</ul></div>
-            <div><h3>Lo que se puede leer públicamente</h3><ul className="checks">
-              <li className="ok"><${Icon} n="check" s=${14} />Precios de lista y promocionales (${disc.promo} en promoción)</li>
-              <li className="ok"><${Icon} n="check" s=${14} />Imágenes y variantes de color</li>
-              <li className=${disc.desc > 0.9 ? 'ok' : 'warn'}><${Icon} n=${disc.desc > 0.9 ? 'check' : 'alert'} s=${14} />Descripciones en ${Math.round(disc.desc * 100)} % de los productos</li>
-              <li className=${disc.mat > 0.9 ? 'ok' : 'warn'}><${Icon} n=${disc.mat > 0.9 ? 'check' : 'alert'} s=${14} />Material publicado en ${Math.round(disc.mat * 100)} %; el resto se inferirá desde la imagen</li>
-              <li className="ok"><${Icon} n="check" s=${14} />Disponibilidad pública (agotado o disponible)</li>
-            </ul>
-            <h3>Lo que una URL pública no muestra</h3>
-            <ul className="checks"><li className="no"><${Icon} n="lock" s=${14} />Costos, márgenes, ventas e inventario interno</li></ul>
-            <div className="opt">
-              <button type="button" className="btn" onClick=${() => setAuthReq(true)}><${Icon} n="link" />Conectar con credenciales</button>
-              <label className="btn" htmlFor="ob-csv"><${Icon} n="upload" />Importar archivo CSV</label><input id="ob-csv" type="file" accept=".csv,.txt" className="sr" onChange=${readCsv} />
-            </div>
-            ${authReq ? html`<${Note} tone="warn">La conexión autenticada (API de ${det.platform} o ERP) requiere backend y no está disponible en el prototipo. Puedes continuar sin costos: el análisis de mercado no los necesita.<//>` : null}
-            ${csv ? html`<${Note}>Leímos <b>${csv.name}</b> en tu navegador: ${csv.rows} filas y ${csv.cols.length} columnas (${csv.cols.slice(0, 5).join(', ')}${csv.cols.length > 5 ? '…' : ''}). En producción se mapearían a costo, ventas e inventario; el prototipo no mezcla tu archivo con los datos de demostración.<//>` : null}
-            </div>
-          </div>
-          <div className="ob-actions"><button className="btn ghost" type="button" onClick=${() => setStep(0)}>Cambiar URL</button><button className="btn primary" type="button" onClick=${goQuestions}>Continuar<${Icon} n="arrow" /></button></div>
-        </div>` : null}
-      </div></div>`;
-
-    if (step === 2) {
-      const set = (k, v) => setAns({ ...ans, [k]: v });
-      const tog = (k, v) => set(k, ans[k].includes(v) ? ans[k].filter((x) => x !== v) : [...ans[k], v]);
-      const valid = ans.cats.length > 0 && (ans.compMode === 'ia' || ans.comps.length >= 2);
-      return html`<div className="ob"><div className="ob-in wide">
-        ${stepper}
-        <div className="ob-head"><h2>Cuatro preguntas y empezamos</h2><span className="muted">Todo se puede cambiar después en Configuración.</span></div>
-        <div className="qs">
-          <section className="q"><h3>1. ¿Cuál es el mercado principal de tu empresa?</h3>
-            <${Seg} label="Mercado" value=${ans.market} onChange=${(v) => set('market', v)} options=${Object.values(TP.MARKETS).map((m) => ({ v: m.id, l: m.name + ' · ' + m.currency }))} /></section>
-          <section className="q"><h3>2. ¿Qué quieres optimizar primero?</h3>
-            <div className="opts">${OBJECTIVES.map((o) => html`<button key=${o.v} type="button" className=${'optc ' + (ans.objective === o.v ? 'on' : '')} aria-pressed=${ans.objective === o.v} onClick=${() => set('objective', o.v)}><b>${o.l}</b><span>${o.d}</span></button>`)}</div></section>
-          <section className="q"><h3>3. ¿Quieres que la IA sugiera tus competidores?</h3>
-            <${Seg} label="Competidores" value=${ans.compMode} onChange=${(v) => set('compMode', v)} options=${[{ v: 'ia', l: 'Sí, sugiérelos' }, { v: 'manual', l: 'Prefiero seleccionarlos' }]} />
-            <div className="chips mt">${ans.counts.map((x, i) => { const on = ans.compMode === 'ia' ? i < 6 : ans.comps.includes(x.b.id); return html`<button key=${x.b.id} type="button" disabled=${ans.compMode === 'ia'} className=${'chip ' + (on ? 'on' : '')} aria-pressed=${on} onClick=${() => tog('comps', x.b.id)}>${x.b.name} <span className="muted">${x.n}</span></button>`; })}</div>
-            <small className="muted">${ans.compMode === 'ia' ? 'Sugeridos: las 6 marcas con más productos en tus mismas categorías (número = productos detectados). Simulado con marcas ficticias.' : 'Elige al menos 2 marcas.'}</small></section>
-          <section className="q"><h3>4. ¿Qué categorías quieres analizar primero?</h3>
-            <div className="chips">${D0.cats.map((c) => html`<button key=${c.id} type="button" className=${'chip ' + (ans.cats.includes(c.id) ? 'on' : '')} aria-pressed=${ans.cats.includes(c.id)} onClick=${() => tog('cats', c.id)}>${c.name}</button>`)}</div></section>
-        </div>
-        <div className="ob-actions"><button className="btn ghost" type="button" onClick=${() => setStep(1)}>Atrás</button><button className="btn primary" type="button" disabled=${!valid} onClick=${() => { setProc(0); setStep(3); }}>Analizar mi mercado<${Icon} n="spark" /></button></div>
-      </div></div>`;
-    }
-
-    // step 3: análisis automático
-    const s = preview ? A.summarize(preview) : null;
-    const done = proc > STEPS.length;
-    const top = preview ? [...preview.allDiag].sort((a, b) => b.priority - a.priority).slice(0, 3) : [];
-    return html`<div className="ob"><div className="ob-in wide">
-      ${stepper}
-      <div className="ob-head"><h2>${done ? 'Tu primer diagnóstico' : 'Analizando tu mercado…'}</h2><${SimTag}>IA simulada · cálculos reales sobre datos de demostración<//></div>
-      <div className="proc">${STEPS.map(([t, fn], i) => html`<div key=${i} className=${'procrow ' + (proc > i ? 'done' : proc === i ? 'run' : '')}><span className="st">${proc > i ? html`<${Icon} n="check" s=${12} />` : ''}</span><b>${t}</b><span className="res">${proc > i && s ? fn(preview, s) : ''}</span></div>`)}</div>
-      ${done && s ? html`<div className="firstdx">
-        <div className="kpis">
-          <div className="kpi"><span>Productos con precio estimado</span><b>${preview.allDiag.filter((d) => d.pos !== 'na').length}<small>/${s.ownN}</small></b></div>
-          <div className="kpi"><span>Por debajo de su banda</span><b className="t-up">${s.below}</b></div>
-          <div className="kpi"><span>Por encima de su banda</span><b className="t-down">${s.above}</b></div>
-          <div className="kpi"><span>Equivalencias para revisar</span><b>${preview.pendingMaps}</b></div>
-        </div>
-        <h3>Lo primero que revisaríamos</h3>
-        <ul className="finds">${top.map((d) => html`<li key=${d.p.id}><${Thumb} p=${d.p} size=${40} /><div><b>${d.p.name}</b> <span className="muted">· ${d.cat.name}</span><div>${A.ACTION[d.action]}: precio ${TP.fmt(d.p.list, preview.mk)} frente a un estimado de ${TP.fmt(d.est, preview.mk)} (${TP.pct(d.gap)}).</div></div></li>`)}</ul>
-        ${preview.cats.filter((c) => !preview.model[c.id].ok).map((c) => html`<${Note} key=${c.id} tone="warn">En <b>${c.name}</b> no estimamos precios: hay ${preview.model[c.id].n} productos comparables y el modelo necesita ${preview.model[c.id].need}. Mostramos solo la lectura de mercado.<//>`)}
-        <div className="ob-actions"><button className="btn ghost" type="button" onClick=${() => setStep(2)}>Ajustar respuestas</button><button className="btn primary" type="button" onClick=${() => onDone(cfgFromAns())}>Entrar a la plataforma<${Icon} n="arrow" /></button></div>
-      </div>` : null}
-    </div></div>`;
-  };
-
   /* =========================================================
      OVERVIEW
      ========================================================= */
@@ -257,10 +104,11 @@
     E.cats.filter((c) => !E.model[c.id].ok).forEach((c) => alerts.push({ tone: 'warn', t: `${c.name}: sin estimación de precio`, d: `${E.model[c.id].n} productos comparables; el modelo necesita ${E.model[c.id].need}. Revisa equivalencias o agrega competidores.`, a: () => go('market', { cat: c.id, sub: 'homolog' }), al: 'Revisar equivalencias' }));
     if (E.pendingMaps) alerts.push({ tone: 'info', t: `${E.pendingMaps} equivalencias de categoría esperan tu revisión`, d: 'La IA propuso segmentar categorías mixtas y descartar algunas con nombre parecido. Ya se usan en el análisis; confírmalas.', a: () => go('market', { sub: 'homolog' }), al: 'Revisar' });
     promoHeavy.forEach((x) => alerts.push({ tone: 'info', t: `${A.brandName(E, x.b)} tiene ${Math.round(x.s * 100)} % de su oferta en promoción`, d: 'El modelo compara precios de lista. Usa la vista de precio promocional para ver su precio efectivo.', a: () => go('market', { sub: 'escalera', priceType: 'promo' }), al: 'Ver escalera' }));
-    if (!E.cfg.privateData) alerts.push({ tone: 'info', t: 'Sin costos ni ventas conectados', d: 'Sin costos no calculamos el precio mínimo rentable ni el margen de cada escenario.', a: () => go('config', { sub: 'integraciones' }), al: 'Conectar datos' });
+    if (!E.hasCost) alerts.push({ tone: 'info', t: 'Sin costos cargados', d: 'Sin costos no calculamos el precio mínimo rentable ni el margen de cada escenario.', a: () => go('data', { sub: 'privados' }), al: 'Cargar costos' });
+    if (E.D.pending) alerts.unshift({ tone: 'info', t: E.D.pending + ' productos importados sin clasificar', d: 'El análisis usa solo productos clasificados. Clasifica más lotes para ampliar la cobertura.', a: () => go('data', { sub: 'clasificacion' }), al: 'Clasificar' });
     const start = { competitividad: ['Revisa los productos por encima de su banda y la escalera de precios', 'market', { sub: 'escalera' }], rentabilidad: ['Empieza por los productos por debajo de su banda con evidencia consistente', 'advisor', { pos: 'below' }], lanzamientos: ['Simula el precio de tu próximo producto con comparables reales', 'launch', {}], promociones: ['Simula escenarios de descuento con su efecto en margen', 'promo', {}] }[obj];
     return html`<div className="page">
-      <header className="ph"><div><div className="eyebrow">Overview</div><h1>¿Qué está pasando con tus precios?</h1><p>${E.cfg.storeName} frente a ${E.cfg.comps.length} competidores en ${E.cats.length} categorías · ${TP.MARKETS[E.cfg.market].name}, ${E.mk.currency}</p></div>
+      <header className="ph"><div><div className="eyebrow">Overview</div><h1>¿Qué está pasando con tus precios?</h1><p>${E.D.brandById.own.name} frente a ${E.cfg.comps.length} competidores en ${E.cats.length} categorías · ${TP.MARKETS[E.cfg.market].name}, ${E.mk.currency}</p></div>
         <button className="startcard" type="button" onClick=${() => go(start[1], start[2])}><span className="eyebrow">Tu prioridad: ${A.OBJECTIVES.find((o) => o.v === obj).l}</span><b>${start[0]}</b><${Icon} n="arrow" /></button></header>
       <div className="kpis">
         <div className="kpi"><span>Portafolio con precio estimado</span><b>${valid.length}<small>/${E.allDiag.length}</small></b><em>${Math.round((valid.length / Math.max(1, E.allDiag.length)) * 100)} % del catálogo analizado</em></div>
@@ -290,12 +138,12 @@
      MARKET INTELLIGENCE
      ========================================================= */
   const SUBS = [
-    ['homolog', 'Homologación'], ['categoria', 'Categoría vs. categoría'], ['producto', 'Producto vs. producto'], ['escalera', 'Escalera'], ['rangos', 'Rangos'], ['piramide', 'Pirámide'], ['territorios', 'Territorios'], ['whitespace', 'White spaces'], ['composicion', 'Composición'], ['capsulas', 'Cápsulas'], ['transversal', 'Entre categorías'],
+    ['homolog', 'Homologación'], ['valor', 'Precio vs. atributos'], ['categoria', 'Categoría vs. categoría'], ['producto', 'Producto vs. producto'], ['escalera', 'Escalera'], ['rangos', 'Rangos'], ['piramide', 'Pirámide'], ['territorios', 'Territorios'], ['whitespace', 'White spaces'], ['composicion', 'Composición'], ['capsulas', 'Cápsulas'], ['transversal', 'Entre categorías'],
   ];
   A.MARKET_SUBS = SUBS;
   A.Market = function (props) {
     const { E, f, setF, sub, setSub } = props;
-    const V = { homolog: Homolog, categoria: CatVsCat, producto: ProdVsProd, escalera: LadderV, rangos: RangesV, piramide: PyramidV, territorios: TerritoryV, whitespace: WhiteSpaceV, composicion: CompositionV, capsulas: CapsulesV, transversal: CrossV }[sub] || Homolog;
+    const V = { homolog: Homolog, valor: ValueV, categoria: CatVsCat, producto: ProdVsProd, escalera: LadderV, rangos: RangesV, piramide: PyramidV, territorios: TerritoryV, whitespace: WhiteSpaceV, composicion: CompositionV, capsulas: CapsulesV, transversal: CrossV }[sub] || Homolog;
     return html`<div className="page">
       <header className="ph"><div><div className="eyebrow">Market Intelligence</div><h1>${SUBS.find((s) => s[0] === sub)[1]}</h1><p>${SUBQ[sub]}</p></div></header>
       <nav className="tabs" aria-label="Vistas de mercado">${SUBS.map(([k, l]) => html`<button key=${k} type="button" className=${sub === k ? 'on' : ''} aria-current=${sub === k ? 'page' : undefined} onClick=${() => setSub(k)}>${l}${k === 'homolog' && E.pendingMaps ? html`<span className="cnt">${E.pendingMaps}</span>` : null}</button>`)}</nav>
@@ -305,6 +153,7 @@
   };
   const SUBQ = {
     homolog: '¿Qué categorías de la competencia son realmente equivalentes a las mías?',
+    valor: '¿Cobro de acuerdo con los atributos de mis productos frente al mercado?',
     categoria: '¿Cómo se compara mi categoría con las categorías equivalentes de cada marca?',
     producto: '¿Qué productos de la competencia se parecen a cada uno de los míos y cuánto cuestan?',
     escalera: '¿Dónde se ubica cada producto de cada marca en la escala de precios?',
@@ -330,7 +179,7 @@
         ${[['all', 'Todas', all.length], ['equiv', 'Equivalentes', all.filter((h) => h.status === 'equiv').length], ['partial', 'Mixtas', all.filter((h) => h.status === 'partial').length], ['noequiv', 'No equivalentes', all.filter((h) => h.status === 'noequiv').length], ['pending', 'Sin revisar', E.pendingMaps]].map(([k, l, n]) => html`<button key=${k} type="button" className=${'sumc ' + (st === k ? 'on' : '')} onClick=${() => setSt(k)}><b>${n}</b><span>${l}</span></button>`)}
         <${Select} id="h-cat" label="Mi categoría" value=${cf} onChange=${setCf} options=${[{ v: 'all', l: 'Todas' }, ...E.cats.map((c) => ({ v: c.id, l: c.name }))]} compact />
       </div>
-      <${Note}>La IA compara <b>contenido</b>, no solo nombres: tipologías detectadas en imágenes y fichas, materiales, usos y rango de precio. En el prototipo esas señales vienen de los datos de demostración <${SimTag} />; en producción salen de embeddings de texto e imagen y de la clasificación multimodal de cada producto.<//>
+      <${Note}>La homologación se decide por <b>contenido</b>, no solo por nombres: la categoría que Claude asignó a cada producto (por su nombre y ficha), sus tipos, materiales y rango de precio. Una etiqueta mixta se segmenta y solo entran los productos equivalentes.<//>
       <div className="maplist">${rows.map((h) => {
         const c = E.D.catById[h.cat], d = dec.map[h.key];
         const included = d === 'reject' ? false : h.status === 'noequiv' ? d === 'accept' || d === 'all' : true;
@@ -451,19 +300,42 @@
       <aside className="plist"><label className="fld" htmlFor="pvp-q"><span>Buscar en tu catálogo (${own.length})</span><input id="pvp-q" type="search" value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Nombre del producto" /></label>
         <ul>${list.map((x) => html`<li key=${x.id}><button type="button" className=${x.id === selId ? 'on' : ''} onClick=${() => setFocus(x.id)}><${Thumb} p=${x} size=${34} /><span><b>${x.name}</b><small>${x.mat} · ${TP.fmt(x.list, E.mk)}</small></span></button></li>`)}</ul></aside>
       <div className="pdetail">
-        <div className="pcard own"><${Thumb} p=${p} size=${92} /><div className="pinfo"><span className="eyebrow">Tu producto</span><h3>${p.name}</h3><div className="muted">${p.typ} · ${p.mat} · ${p.color}${p.collection ? ' · colección ' + p.collection : ''}</div><div className="price">${TP.fmt(p.list, E.mk)}${p.promo ? html` <span className="muted">promoción ${TP.fmt(p.promo, E.mk)}</span>` : null}</div>
+        <div className="pcard own"><${Thumb} p=${p} size=${92} /><div className="pinfo"><span className="eyebrow">Tu producto</span><h3>${p.name}</h3><div className="muted">${p.typ} · ${p.mat} · ${p.color}${p.collection ? ' · ' + p.collection : ''}${p.url ? html` · <a href=${p.url} target="_blank" rel="noopener noreferrer">ver en la tienda</a>` : null}</div>${p.ev ? html`<div className="sm muted">Evidencia: «${p.ev}»</div>` : null}<div className="price">${TP.fmt(p.list, E.mk)}${p.promo ? html` <span className="muted">promoción ${TP.fmt(p.promo, E.mk)}</span>` : null}</div>
           <div className="lvls">${cat.attrs.map((a, i) => html`<span key=${a.id} title=${a.levels[p.lv[i] - 1]}><em>${a.name}</em><i className="pips">${[1, 2, 3, 4, 5].map((k) => html`<b key=${k} className=${k <= p.lv[i] ? 'on' : ''}></b>`)}</i></span>`)}</div></div>
           <div className="pstat"><span>Mediana de comparables aceptados</span><b>${TP.fmt(med, E.mk)}</b><em>${isFinite(med) ? 'Tu precio está ' + TP.pct(p.list / med - 1) + ' frente a ellos' : 'Sin comparables suficientes'}</em></div></div>
         <div className="ptitle"><h2>Comparables propuestos por IA (${acc.length})</h2><label className="tgl" htmlFor="pvp-rej"><input id="pvp-rej" type="checkbox" checked=${showRej} onChange=${(e) => setShowRej(e.target.checked)} />Mostrar descartados</label></div>
         ${shown.length ? html`<div className="comps">${shown.map((x) => { const d = dec.comp[x.key]; return html`<article key=${x.key} className=${'comp ' + (d === 'reject' ? 'off' : '')}>
           <${Thumb} p=${x.q} size=${64} /><div className="cbody">
-            <div className="chead"><div><span className="muted">${A.brandName(E, x.q.brand)}</span><b>${x.q.name}</b><small>${x.q.typ} · ${x.q.mat} · ${x.q.color}</small></div><div className="cprice"><b>${TP.fmt(x.q.list, E.mk)}</b>${x.q.promo ? html`<small>promo ${TP.fmt(x.q.promo, E.mk)}</small>` : null}</div></div>
+            <div className="chead"><div><span className="muted">${A.brandName(E, x.q.brand)}</span><b>${x.q.name}</b><small>${x.q.typ} · ${x.q.mat} · ${x.q.color}${x.q.url ? html` · <a href=${x.q.url} target="_blank" rel="noopener noreferrer">ver en la tienda</a>` : null}</small></div><div className="cprice"><b>${TP.fmt(x.q.list, E.mk)}</b>${x.q.promo ? html`<small>promo ${TP.fmt(x.q.promo, E.mk)}</small>` : null}</div></div>
             <div className="cbadges"><${Badge} tone=${x.s.label === 'Muy similar' ? 'ok' : x.s.label === 'Similar' ? 'info' : 'neutral'}>${x.s.label}<//><span className="muted sm" title="Índice heurístico de 0 a 1 (tipología, material y distancia entre niveles). No es una probabilidad calibrada.">índice ${x.s.score.toFixed(2).replace('.', ',')}</span><${Badge} tone=${x.s.conf.startsWith('Clasificación') ? 'neutral' : 'warn'}>${x.s.conf}<//>${d === 'accept' ? html`<${Badge} tone="info">Confirmado por ti<//>` : null}</div>
             <p className="cexp">${explain(x)}</p>
             <div className="mapact"><button type="button" className=${'btn sm ' + (d === 'accept' ? 'primary' : '')} onClick=${() => setD(x.key, 'accept')}><${Icon} n="check" />Es comparable</button><button type="button" className=${'btn sm ' + (d === 'reject' ? 'danger' : '')} onClick=${() => setD(x.key, 'reject')}><${Icon} n="x" />No es comparable</button></div>
           </div></article>`; })}</div>` : html`<${Empty} title="Sin comparables con similitud suficiente">Amplía los competidores de la vista o revisa la homologación.<//>`}
-        <p className="foot">Imágenes ilustrativas generadas para la demo. Los comparables descartados dejan de usarse en el Price Advisor.</p>
+        <p className="foot">Íconos ilustrativos por tipo y color (las fotos de otras tiendas no se pueden cargar aquí; usa «ver en la tienda»). Los comparables descartados dejan de usarse en el Price Advisor.</p>
       </div></div>`;
+  }
+
+  /* ---- Precio vs. atributos (vista central del agente original) ---- */
+  A.score = (cat, p) => { const w = cat.attrs.map((a) => (a.weight == null ? 1 : a.weight)); const tw = TP.sum(w) || 1; return TP.sum(p.lv.map((v, j) => v * w[j])) / tw; };
+  function ValueV({ E, f, go, setFocus, setSub }) {
+    const cat = E.D.catById[f.cat];
+    const own = A.viewOwn(E, f, f.cat), pool = A.viewPool(E, f, f.cat);
+    const b = E.band[f.cat];
+    const st = A.brandStats(E, { ...f, priceType: 'list' }, f.cat, false);
+    const cls = {}; st.forEach((r) => { cls[r.id] = r.med < b.c1 ? 0 : r.med < b.c2 ? 1 : 2; });
+    const pts = [...pool.map((p) => ({ p, x: A.score(cat, p), y: A.priceOf(p, f.priceType), g: cls[p.brand] != null ? cls[p.brand] : 1, own: false, brandName: A.brandName(E, p.brand) })), ...own.map((p) => ({ p, x: A.score(cat, p), y: A.priceOf(p, f.priceType), own: true }))];
+    const so = TP.mean(own.map((p) => A.score(cat, p))), sm = TP.mean(pool.map((p) => A.score(cat, p)));
+    const all = E.D.products.filter((p) => p.brand === 'own' && p.cat === f.cat);
+    const pend = all.filter((p) => p.conf === 'baja' || p.imputed >= 2).length;
+    return html`<div>
+      <div className="kpis">
+        <div className="kpi"><span>Con atributos completos</span><b>${all.filter((p) => !p.imputed).length}<small> de ${all.length} productos</small></b><em>tus productos con todos sus atributos calificados</em></div>
+        <div className="kpi"><span>Por confirmar</span><b>${pend}<small> productos</small></b><em>Claude no está seguro de algún atributo · <button type="button" className="linkbtn" onClick=${() => go('data', { sub: 'revision' })}>Revisar</button></em></div>
+        <div className="kpi"><span>Tu marca frente al mercado</span><b>${isFinite(so - sm) ? (so - sm >= 0 ? '+' : '') + (so - sm).toFixed(2).replace('.', ',') : '—'}<small> puntos de atributos</small></b><em>${E.D.brandById.own.name} ${isFinite(so) ? so.toFixed(2).replace('.', ',') : '—'} · competencia ${isFinite(sm) ? sm.toFixed(2).replace('.', ',') : '—'} · ${cat.short}</em></div>
+      </div>
+      <section className="panel"><${UI.ValueScatter} pts=${pts} bands=${b} mk=${E.mk} ownName=${E.D.brandById.own.name} onPick=${(p) => { if (p.brand === 'own') { setFocus(p.id); setSub('producto'); } }} />
+        <p className="foot">Puntaje de atributos = promedio ponderado de los niveles 1 a 5 (pesos editables en la rúbrica). La competencia se colorea por la franja de su marca. Clic en un producto tuyo para ver sus comparables.</p></section>
+    </div>`;
   }
 
   /* ---- Escalera / Rangos / Pirámide / Territorios ---- */
@@ -486,7 +358,7 @@
     const own = A.viewOwn(E, f, f.cat), pool = A.viewPool(E, f, f.cat);
     const cnt = (ps) => [0, 1, 2].map((bi) => ps.filter((p) => TP.bandOf(A.priceOf(p, f.priceType), b) === bi).length);
     const st = brandStats(E, f, f.cat);
-    return html`<div className="grid-2"><section className="panel"><${UI.Pyramid} own=${cnt(own)} mkt=${cnt(pool)} bands=${b} mk=${E.mk} ownName=${E.cfg.storeName} /></section>
+    return html`<div className="grid-2"><section className="panel"><${UI.Pyramid} own=${cnt(own)} mkt=${cnt(pool)} bands=${b} mk=${E.mk} ownName=${E.D.brandById.own.name} /></section>
       <section className="panel"><h2>Referencias por franja y marca</h2><div className="tw"><table className="tbl"><thead><tr><th>Marca</th><th className="num">Entrada</th><th className="num">Core</th><th className="num">Premium</th></tr></thead><tbody>${st.map((r) => html`<tr key=${r.id} className=${r.own ? 'ownrow' : ''}><td>${r.name}</td>${[0, 1, 2].map((i) => html`<td key=${i} className="num">${Math.round(r.bandMix[i] * r.n)}</td>`)}</tr>`)}</tbody></table></div>
       <p className="foot">Concentración alta = franja disputada. Poca oferta en una franja no prueba que exista demanda: valídalo antes de invertir.</p></section></div>`;
   }
@@ -541,19 +413,19 @@
     const items = keys.map((k) => ({ label: dim === 'attr' ? 'Nivel ' + k + ' · ' + cat.attrs[ai].levels[k - 1] : k, own: own.filter((p) => keyOf(p) === k).length / Math.max(1, own.length), mkt: pool.filter((p) => keyOf(p) === k).length / Math.max(1, pool.length), sw: dim === 'color' ? UI.colorHex(k) : null }));
     const big = [...items].sort((a, b) => Math.abs(b.own - b.mkt) - Math.abs(a.own - a.mkt))[0];
     return html`<section className="panel"><div className="row-between"><${Seg} label="Dimensión" value=${dim} onChange=${setDim} options=${[{ v: 'color', l: 'Colores' }, { v: 'mat', l: 'Materiales' }, { v: 'typ', l: 'Tipologías' }, { v: 'attr', l: 'Atributo' }]} />${dim === 'attr' ? html`<${Select} id="comp-attr" label="Atributo" value=${attr} onChange=${setAttr} options=${cat.attrs.map((a) => ({ v: a.id, l: a.name }))} compact />` : null}</div>
-      <${UI.Paired} items=${items} ownName=${E.cfg.storeName} />
+      <${UI.Paired} items=${items} ownName=${E.D.brandById.own.name} />
       ${big ? html`<p className="insight"><${Icon} n="spark" />La mayor diferencia está en <b>${big.label}</b>: ${Math.round(big.own * 100)} % de tu portafolio frente a ${Math.round(big.mkt * 100)} % de la oferta de la competencia.</p>` : null}
-      <p className="foot">Colores normalizados a una lista estándar por categoría (configurable). Materiales no publicados se infieren de la imagen.</p></section>`;
+      <p className="foot">Colores y materiales normalizados a las listas estándar de cada categoría (editables en Catálogo y clasificación).</p></section>`;
   }
 
   /* ---- Cápsulas ---- */
   function CapsulesV({ E, f, go, openProduct }) {
     const [g, setG] = useState('collection');
     const diag = E.diag[f.cat].filter((d) => (f.mat === 'all' || d.p.mat === f.mat) && (f.typ === 'all' || d.p.typ === f.typ));
-    const keyOf = (d) => (g === 'collection' ? d.p.collection : g === 'season' ? d.p.season : d.p.typ);
+    const keyOf = (d) => (g === 'collection' ? d.p.collection : g === 'mat' ? d.p.mat : d.p.typ);
     const groups = [...new Set(diag.map(keyOf))].map((k) => { const ds = diag.filter((d) => keyOf(d) === k); const gaps = ds.map((d) => d.gap).filter(isFinite); return { k, ds, med: TP.median(ds.map((d) => d.p.list)), gap: gaps.length ? TP.mean(gaps) : NaN, below: ds.filter((d) => d.pos === 'below').length, above: ds.filter((d) => d.pos === 'above').length, mix: [0, 1, 2].map((bi) => ds.filter((d) => TP.bandOf(d.p.list, E.band[f.cat]) === bi).length / ds.length) }; }).sort((a, b) => b.ds.length - a.ds.length);
     const [open, setOpen] = useState(null);
-    return html`<div><${Seg} label="Agrupar por" value=${g} onChange=${(v) => { setG(v); setOpen(null); }} options=${[{ v: 'collection', l: 'Colección' }, { v: 'season', l: 'Temporada' }, { v: 'typ', l: 'Estilo (tipología)' }]} />
+    return html`<div><${Seg} label="Agrupar por" value=${g} onChange=${(v) => { setG(v); setOpen(null); }} options=${[{ v: 'collection', l: 'Colección o etiqueta de tu tienda' }, { v: 'typ', l: 'Estilo (tipo)' }, { v: 'mat', l: 'Material' }]} />
       <div className="caps">${groups.map((x) => html`<section key=${x.k} className="panel cap"><div className="caphead"><div><h3>${x.k}</h3><span className="muted">${x.ds.length} productos · mediana ${TP.fmt(x.med, E.mk)}</span></div>
         <div className="capk"><span>Brecha media vs. estimado</span><b className=${x.gap < 0 ? 't-up' : 't-down'}>${TP.pct(x.gap)}</b></div>
         <div className="capk"><span>Debajo / encima</span><b>${x.below} / ${x.above}</b></div>

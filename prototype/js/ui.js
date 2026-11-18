@@ -36,7 +36,8 @@
 
   /* ---------- imagen ilustrativa del producto (no es la foto real) ---------- */
   const COLORS = { Negro: '#2b2b2e', Café: '#6b4428', Camel: '#b98a52', Vino: '#6e1f2e', Beige: '#d8c6a5', 'Verde oliva': '#6b6b3a', 'Azul noche': '#23324f', 'Rosa palo': '#d9a8a5', Blanco: '#ecebe6', Nude: '#d6b49a', Gris: '#8b8d91', Arena: '#cdb994', 'Verde salvia': '#93a48a', Terracota: '#b8613f', 'Azul petróleo': '#2f5a63', Natural: '#c9a77a', Nogal: '#5d4030', Latón: '#b8963e' };
-  UI.colorHex = (c) => COLORS[c] || '#999';
+  const KEYS = [['negro', '#2b2b2e'], ['blanco', '#ecebe6'], ['marfil', '#e9e2cf'], ['crema', '#e6dcc3'], ['beige', '#d8c6a5'], ['arena', '#cdb994'], ['nude', '#d6b49a'], ['camel', '#b98a52'], ['cafe', '#6b4428'], ['marron', '#6b4428'], ['chocolate', '#4e3020'], ['cognac', '#9a5a2c'], ['miel', '#c08a3e'], ['vino', '#6e1f2e'], ['burdeo', '#6e1f2e'], ['rojo', '#b3332e'], ['rosa', '#d9a8a5'], ['fucsia', '#c2387a'], ['naranja', '#d9772f'], ['terracota', '#b8613f'], ['mostaza', '#c79a2c'], ['amarillo', '#e3c34a'], ['oliva', '#6b6b3a'], ['salvia', '#93a48a'], ['verde', '#3f7a52'], ['turquesa', '#2f9a9a'], ['petroleo', '#2f5a63'], ['azul', '#2c4f8a'], ['navy', '#23324f'], ['morado', '#6a4a8a'], ['lila', '#a48bc4'], ['gris', '#8b8d91'], ['plata', '#b8bcc2'], ['dorado', '#b8963e'], ['laton', '#b8963e'], ['natural', '#c9a77a'], ['nogal', '#5d4030'], ['madera', '#9a6e45'], ['multicolor', '#8a7aa8']];
+  UI.colorHex = (c) => { if (COLORS[c]) return COLORS[c]; const t = TP.strip(String(c || '')); const k = KEYS.find(([w]) => t.includes(w)); return k ? k[1] : '#9aa0a8'; };
   function shape(typ, f) {
     const s = { fill: f, stroke: 'rgba(0,0,0,.35)', strokeWidth: 1 };
     const st = { fill: 'none', stroke: f, strokeWidth: 2.4, strokeLinecap: 'round' };
@@ -242,6 +243,43 @@
       </div>
       <div className="cval">${TP.pct(c.pct, 1)} <span className="muted">por nivel</span>${!c.sig ? html` <${UI.Badge} tone="warn" title="El intervalo de 90 % incluye cero">no concluyente<//>` : null}</div>
     </div>`)}<div className="legend"><span><i className="sw bar"></i>Prima de precio por cada nivel adicional (exp(β) − 1)</span><span><i className="sw line"></i>Intervalo de 90 %</span></div></div>`;
+  };
+
+  /* ---------- precio frente a puntaje de atributos ---------- */
+  UI.ValueScatter = function ({ pts, bands, mk, ownName, onPick }) {
+    const [h, setH] = useHover();
+    const [mode, setMode] = useState('nivel');
+    if (pts.length < 3) return html`<${UI.Empty} title="Aún no hay suficientes productos clasificados">Clasifica más productos de tu tienda y de la competencia para ver esta vista.<//>`;
+    const W = 860, H = 430, L = 92, R = 20, T = 14, B = 44;
+    const ys = pts.map((p) => p.y).filter((v) => v > 0);
+    const yMax = TP.quantile(ys, 0.99) * 1.12;
+    const x = linScale(1, 5, L, W - R), y = linScale(0, yMax, H - B, T);
+    const mkt = pts.filter((p) => !p.own);
+    const fx = mkt.map((p) => p.x), fy = mkt.map((p) => p.y);
+    const mx = TP.mean(fx), myy = TP.mean(fy);
+    const slope = TP.sum(fx.map((v, i) => (v - mx) * (fy[i] - myy))) / Math.max(1e-9, TP.sum(fx.map((v) => (v - mx) ** 2)));
+    const icpt = myy - slope * mx;
+    const ticks = []; const step = Math.pow(10, Math.floor(Math.log10(yMax / 4))); const nice = [1, 2, 2.5, 5, 10].map((m) => m * step).find((s) => yMax / s <= 6) || step * 10;
+    for (let v = 0; v <= yMax; v += nice) ticks.push(v);
+    const brands = [...new Set(mkt.map((p) => p.p.brand))];
+    const bIdx = Object.fromEntries(brands.map((b, i) => [b, i]));
+    const cls = (p) => (p.own ? 'own' : mode === 'nivel' ? 'g' + p.g : 'b' + (bIdx[p.p.brand] % 3));
+    const zone = (a, b2, i, name) => { const y0 = y(Math.min(yMax, b2)), y1 = y(Math.max(0, a)); return y1 > y0 ? html`<g key=${i}><rect x=${L} y=${y0} width=${W - R - L} height=${y1 - y0} className=${'zone z' + i} /><text x=${L - 12} y=${(y0 + y1) / 2 + 4} textAnchor="end" className="zname">${name}</text></g>` : null; };
+    const cnt = [0, 1, 2].map((g) => mkt.filter((p) => p.g === g).length);
+    return html`<div className="chart">
+      <div className="row-between"><h2>Precio frente a puntaje de atributos</h2><${UI.Seg} size="sm" label="Color" value=${mode} onChange=${setMode} options=${[{ v: 'nivel', l: 'Por nivel de marca' }, { v: 'brand', l: 'Por competidor' }]} /></div>
+      <svg viewBox=${`0 0 ${W} ${H}`} className="svgc" role="img" aria-label="Precio frente a puntaje de atributos">
+        ${zone(0, bands.c1, 0, 'Entrada')}${zone(bands.c1, bands.c2, 1, 'Core')}${zone(bands.c2, yMax, 2, 'Top')}
+        ${ticks.map((t) => html`<g key=${t}><line x1=${L} x2=${W - R} y1=${y(t)} y2=${y(t)} className="grid" /><text x=${L + 4} y=${y(t) - 3} className="tick">${TP.fmt(t, mk, true)}</text></g>`)}
+        ${[1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5].map((v) => html`<text key=${v} x=${x(v)} y=${H - B + 16} textAnchor="middle" className="tick">${String(v).replace('.', ',')}</text>`)}
+        <text x=${(L + W - R) / 2} y=${H - 6} textAnchor="middle" className="axl">Puntaje de atributos (1 a 5)</text>
+        <line x1=${x(1)} y1=${y(Math.max(0, icpt + slope))} x2=${x(5)} y2=${y(Math.max(0, Math.min(yMax, icpt + slope * 5)))} className="valueline" />
+        ${pts.filter((p) => p.y <= yMax).map((p, i) => { const cx = x(p.x), cy = y(p.y); const enter = () => setH(html`<b>${p.p.name}</b> · ${p.own ? ownName : p.brandName || ''} · puntaje ${p.x.toFixed(2).replace('.', ',')} · ${TP.fmt(p.y, mk)}`); return p.own
+          ? html`<path key=${'o' + i} d=${`M${cx} ${cy - 6}L${cx + 6} ${cy + 5}L${cx - 6} ${cy + 5}Z`} className="tri hit" onMouseEnter=${enter} onMouseLeave=${() => setH(null)} onClick=${() => onPick && onPick(p.p)} />`
+          : html`<circle key=${'m' + i} cx=${cx} cy=${cy} r="4.5" className=${'vdot ' + cls(p)} onMouseEnter=${enter} onMouseLeave=${() => setH(null)} />`; })}
+      </svg>
+      <div className="legend"><span><i className="sw trio"></i>${ownName} · ${pts.length - mkt.length}</span>${mode === 'nivel' ? html`<span><i className="sw vd g0"></i>Marcas de entrada · ${cnt[0]}</span><span><i className="sw vd g1"></i>Marcas core · ${cnt[1]}</span><span><i className="sw vd g2"></i>Marcas top · ${cnt[2]}</span>` : html`<span className="muted">Competidores en tonos del mismo color; identifica cada uno al pasar el cursor.</span>`}<span><i className="sw dash"></i>Tendencia lineal del mercado</span></div>
+      <${UI.Readout} h=${h} /></div>`;
   };
 
   /* ---------- líneas (Pulse y aprendizaje) ---------- */
