@@ -10,6 +10,7 @@ const TP = require('./shared');
 const I = TP.ingest;
 
 const CHUNK = 150;
+const needComps = () => Object.assign(new Error('No encontramos competidores con un catálogo público que podamos leer. Escribe los links de 2 a 5 competidores y seguimos con el análisis.'), { code: 'need_comps' });
 const BATCH = Number(process.env.CLASSIFY_BATCH || ((process.env.AI_PROVIDER || '').toLowerCase() === 'gateway' ? 20 : 40));
 const MAX_BATCHES = Number(process.env.CLASSIFY_MAX_BATCHES || 150);
 const CONCURRENCY = Number(process.env.JOB_CONCURRENCY || 2);
@@ -134,37 +135,48 @@ const RUN = {
       const own = Object.values(ws.catalog).flatMap((c) => c.items || []);
       const labels = {}; own.forEach((p) => (labels[p.label] = (labels[p.label] || 0) + 1));
       const tld = (new URL(s.url).hostname.split('.').pop() || '').toLowerCase();
-      const out = await ai.research('Eres analista de pricing de retail en Latinoamérica. Usa la búsqueda web para encontrar las tiendas online que compiten directamente con esta tienda.\n\n' +
-        'Tienda: ' + s.url + ' (dominio .' + tld + ')\nCategorías del catálogo: ' + Object.entries(labels).sort((a, b) => b[1] - a[1]).slice(0, 8).map((x) => x[0]).join(', ') + '\nEjemplos de productos y precios: ' + own.slice(0, 15).map((p) => p.name + ' (' + p.price + ')').join('; ') + '\n\n' +
-        'Busca 6 a 8 marcas o tiendas competidoras directas: mismo país de venta, mismo tipo de producto y rango de precio parecido, con tienda online propia. Excluye marketplaces y tiendas por departamentos (Mercado Libre, Amazon, Falabella, Linio, Dafiti, Éxito, Liverpool, Ripley, Paris, Walmart, Shein) y la propia tienda.\n' +
-        'Responde solo JSON: {"country": "CO"|"MX"|"PE"|"CL"|otro código ISO, "storeName": "nombre comercial de la tienda", "competitors": [{"name": "Marca", "url": "https://dominio-de-su-tienda"}]}', { ...owner, kind: 'quick-competitors', maxUses: 6 });
-      const comps = (out.competitors || []).filter((c) => c && c.url && /^https?:\/\//.test(c.url)).slice(0, 8);
-      if (!comps.length) throw new Error('No encontramos competidores para comparar.');
-      const market = ['CO', 'MX', 'PE', 'CL'].includes(out.country) ? out.country : 'CO';
-      await store.put(org, 'stores', 'own', { ...s, name: out.storeName || s.name }, 'sistema');
-      await save({ phase: 'comps', candidates: comps, market, storeName: out.storeName || s.name });
+      const tried = st.tried || [];
+      let out = {};
+      try {
+        out = await ai.research('Eres analista de pricing de retail en Latinoamérica. Usa la búsqueda web para encontrar las tiendas online que compiten directamente con esta tienda.\n\n' +
+          'Tienda: ' + s.url + ' (dominio .' + tld + ')\nCategorías del catálogo: ' + Object.entries(labels).sort((a, b) => b[1] - a[1]).slice(0, 8).map((x) => x[0]).join(', ') + '\nEjemplos de productos y precios: ' + own.slice(0, 15).map((p) => p.name + ' (' + p.price + ')').join('; ') + '\n\n' +
+          'Busca 10 a 12 marcas o tiendas competidoras directas: mismo país de venta, el MISMO tipo de producto (no otras categorías) y rango de precio parecido, cada una con su propia tienda online. Excluye marketplaces, grandes superficies y tiendas por departamentos (Mercado Libre, Amazon, Falabella, Linio, Dafiti, Éxito, Homecenter, Panamericana, Liverpool, Ripley, Paris, Walmart, Shein) y la propia tienda.\n' +
+          'Da solo dominios reales que conozcas con certeza (la página de inicio de la tienda, no redes sociales). Prioriza marcas cuya tienda corre en Shopify, VTEX o WooCommerce.\n' +
+          (tried.length ? 'Estas ya las probamos y NO sirven, no las repitas: ' + tried.join(', ') + '\n' : '') +
+          'Responde solo JSON: {"country": "CO"|"MX"|"PE"|"CL"|otro código ISO, "storeName": "nombre comercial de la tienda", "competitors": [{"name": "Marca", "url": "https://dominio-de-su-tienda"}]}', { ...owner, kind: 'quick-competitors', maxUses: 6 });
+      } catch (e) { if (e.code === 'billing') throw e; out = {}; }
+      const host = (u) => { try { return new URL(u).host.replace(/^www\./, ''); } catch (e) { return ''; } };
+      const seen = new Set([host(s.url), ...tried.map(host)]);
+      const comps = (out.competitors || []).filter((c) => c && c.url && /^https?:\/\//.test(c.url) && host(c.url) && !seen.has(host(c.url)) && seen.add(host(c.url))).slice(0, 12);
+      const market = ['CO', 'MX', 'PE', 'CL'].includes(out.country) ? out.country : (st.market || 'CO');
+      if (out.storeName) await store.put(org, 'stores', 'own', { ...s, name: out.storeName }, 'sistema');
+      if (!comps.length) { await save({ phase: 'need_comps', market, storeName: out.storeName || st.storeName || s.name }); throw needComps(); }
+      await save({ phase: 'comps', candidates: comps, market, storeName: out.storeName || st.storeName || s.name });
       return { partial: true };
     }
     if (phase === 'comps') {
       const found = st.found || [], tried = st.tried || [];
-      for (const c of st.candidates) {
-        if (found.length >= Number(process.env.QUICK_COMPS || 5) || Date.now() > job.deadline - 40000) break;
-        if (tried.includes(c.url)) continue;
-        tried.push(c.url);
-        try {
-          const res = await crawl(c.url, null, { maxPages: 1 });
-          if (res.items.length < 10) continue;
-          let sid = slug(c.name); if (sid === 'own' || found.some((f) => f.sid === sid)) sid += '-' + found.length;
-          const items = cap(res.items, Number(process.env.QUICK_COMP_MAX || 55));
+      const want = Number(process.env.QUICK_COMPS || 5);
+      const todo = st.candidates.filter((c) => !tried.includes(c.url));
+      for (let i = 0; i < todo.length && found.length < want && Date.now() < job.deadline - 45000; i += 4) {
+        const group = todo.slice(i, i + 4);
+        group.forEach((c) => tried.push(c.url));
+        const got = await Promise.all(group.map((c) => crawl(c.url, null, { maxPages: 1 }).then((res) => ({ c, res }), () => null)));
+        for (const g of got) {
+          if (!g || g.res.items.length < 10 || found.length >= want) continue;
+          let sid = slug(g.c.name); if (sid === 'own' || found.some((f) => f.sid === sid)) sid += '-' + found.length;
+          const items = cap(g.res.items, Number(process.env.QUICK_COMP_MAX || 55));
           const chunks = await saveCatalog(org, sid, items, 0);
-          await store.put(org, 'stores', sid, { name: c.name, url: res.origin, role: 'comp', n: items.length, chunks, platform: res.platform, importedAt: new Date().toISOString() }, 'sistema');
-          found.push({ sid, name: c.name, n: items.length });
-        } catch (e) { /* sin catálogo público: se omite */ }
+          await store.put(org, 'stores', sid, { name: g.c.name, url: g.res.origin, role: 'comp', n: items.length, chunks, platform: g.res.platform, importedAt: new Date().toISOString() }, 'sistema');
+          found.push({ sid, name: g.c.name, n: items.length });
+        }
         await save({ found, tried });
       }
-      const pending = st.candidates.some((c) => !tried.includes(c.url)) && found.length < Number(process.env.QUICK_COMPS || 5);
+      const pending = st.candidates.some((c) => !tried.includes(c.url)) && found.length < want;
       if (pending) return { partial: true };
-      if (!found.length) throw new Error('Ninguno de los competidores encontrados publica un catálogo que podamos leer. Prueba con otra tienda.');
+      // Pocos competidores legibles: una segunda búsqueda excluyendo los que no sirvieron; si tampoco, se le piden al usuario.
+      if (found.length < 2 && !st.round2 && !st.manual) { await save({ phase: 'discover', round2: true }); return { partial: true }; }
+      if (!found.length) { await save({ phase: 'need_comps' }); throw needComps(); }
       await save({ phase: 'cats' });
       return { partial: true };
     }

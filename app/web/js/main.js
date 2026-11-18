@@ -352,8 +352,22 @@
     </div></div>`;
   }
   const PHASES = [['own', 'Leyendo el catálogo de la tienda'], ['discover', 'Buscando competidores en la web'], ['comps', 'Leyendo el catálogo de los competidores'], ['cats', 'Proponiendo categorías y atributos'], ['classify', 'Clasificando productos con IA'], ['done', 'Construyendo el análisis']];
+  function CompsAsk({ org, p, onReset, onSent }) {
+    const [txt, setTxt] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
+    const urls = txt.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+    const send = async (e) => { e.preventDefault(); setBusy(true); setErr(''); try { await L.api('POST', '/quick/' + org + '/comps', { urls }); onSent(); } catch (x) { setErr(x.message); setBusy(false); } };
+    const tried = (p.tried || []).map((u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return u; } });
+    return html`<form className="urlform" onSubmit=${send}>
+      <${Note} tone="warn">No encontramos competidores con un catálogo público que podamos leer${tried.length ? ' (probamos ' + tried.slice(0, 10).join(', ') + ')' : ''}. Si conoces a tus competidores, escribe sus links y seguimos con el análisis.<//>
+      <label className="fld" htmlFor="qc-u"><span>Links de 2 a 5 competidores (uno por línea)</span><textarea id="qc-u" rows="5" placeholder=${'marca1.com\nmarca2.com.co'} value=${txt} onInput=${(e) => setTxt(e.target.value)}></textarea></label>
+      <p className="hint">Funciona con tiendas en Shopify, VTEX o WooCommerce que publican su catálogo.</p>
+      ${err ? html`<div className="err" role="alert">${err}</div>` : null}
+      <div className="ob-actions"><button className="btn ghost" type="button" onClick=${onReset}>Analizar otra tienda</button><button className="btn primary" type="submit" disabled=${busy || !urls.length}>${busy ? 'Enviando…' : 'Continuar con estos competidores'}</button></div>
+    </form>`;
+  }
   function QuickGate({ org, me, children, onReset }) {
     const [st, setSt] = useState(undefined);
+    const [kick, setKick] = useState(0);
     useEffect(() => {
       let alive = true, timer = null, pumping = false;
       const pull = async () => {
@@ -365,7 +379,7 @@
       };
       pull();
       return () => { alive = false; clearTimeout(timer); };
-    }, [org]);
+    }, [org, kick]);
     if (st === undefined) return html`<${Center}><span className="spin"></span><//>`;
     if (st && st.status === 'done') return children;
     const p = (st && st.progress) || {};
@@ -373,8 +387,8 @@
     const detail = { own: p.own != null ? p.own + ' productos tomados para el análisis' + (p.ownTotal > p.own ? ' (de ' + p.ownTotal + ' publicados)' : '') + (p.platform ? ' · ' + p.platform : '') : '', discover: p.candidates ? p.candidates.length + ' candidatos: ' + p.candidates.map((c) => c.name).join(', ') : '', comps: p.found ? p.found.map((f) => f.name + ' (' + f.n + ')').join(', ') || 'Probando tiendas…' : '', cats: p.cats ? p.cats.join(', ') : '', classify: p.classified != null ? p.classified + ' clasificados · ' + (p.left || 0) + ' en cola' : '' };
     return html`<div className="ob"><div className="ob-in wide">
       <div className="brandmark"><span className="logo">T</span>TITA Pricing Intelligence <b>360°</b></div>
-      <div className="ob-head"><h2>${st && st.status === 'failed' ? 'No pudimos completar el análisis' : 'Analizando ' + (me.org ? me.org.name : 'la tienda') + '…'}</h2><span className="muted sm">Puedes dejar esta pestaña abierta; el análisis avanza mientras la ves.</span></div>
-      ${st && st.status === 'failed' ? html`<div><${Note} tone="warn">${st.error}<//><div className="ob-actions"><button className="btn primary" type="button" onClick=${onReset}>Analizar otra tienda</button></div></div>` : html`<div className="proc">${PHASES.map(([k, t], i) => html`<div key=${k} className=${'procrow ' + (i < cur ? 'done' : i === cur ? 'run' : '')}><span className="st">${i < cur ? html`<${Icon} n="check" s=${12} />` : ''}</span><b>${t}</b><span className="res">${detail[k] || ''}</span></div>`)}</div>`}
+      <div className="ob-head"><h2>${st && st.status === 'failed' && p.phase === 'need_comps' ? '¿Quiénes son tus competidores?' : st && st.status === 'failed' ? 'No pudimos completar el análisis' : 'Analizando ' + (me.org ? me.org.name : 'la tienda') + '…'}</h2><span className="muted sm">Puedes dejar esta pestaña abierta; el análisis avanza mientras la ves.</span></div>
+      ${st && st.status === 'failed' && p.phase === 'need_comps' ? html`<${CompsAsk} org=${org} p=${p} onReset=${onReset} onSent=${() => { setSt({ status: 'queued', progress: { ...p, phase: 'comps', found: p.found || [] } }); setKick((x) => x + 1); }} />` : st && st.status === 'failed' ? html`<div><${Note} tone="warn">${st.error}<//><div className="ob-actions"><button className="btn primary" type="button" onClick=${onReset}>Analizar otra tienda</button></div></div>` : html`<div className="proc">${PHASES.map(([k, t], i) => html`<div key=${k} className=${'procrow ' + (i < cur ? 'done' : i === cur ? 'run' : '')}><span className="st">${i < cur ? html`<${Icon} n="check" s=${12} />` : ''}</span><b>${t}</b><span className="res">${detail[k] || ''}</span></div>`)}</div>`}
     </div></div>`;
   }
 

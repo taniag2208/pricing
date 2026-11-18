@@ -266,6 +266,18 @@ app.post('/api/quick/:org/pump', auth, orgAccess(1), wrap(async (req, res) => {
   if (!k || k.kind !== 'quick') throw fail(400, 'invalid', 'No es un análisis rápido.');
   res.json({ ran: await jobs.step(req.params.org) });
 }));
+app.post('/api/quick/:org/comps', auth, orgAccess(1), wrap(async (req, res) => {
+  const k = (await q('select kind from orgs where id = $1', [req.params.org])).rows[0];
+  if (!k || k.kind !== 'quick') throw fail(400, 'invalid', 'No es un análisis rápido.');
+  const urls = [...new Set((Array.isArray(req.body.urls) ? req.body.urls : []).map((u) => TPI.ingest.origin(String(u || ''))).filter(Boolean))].slice(0, 6);
+  if (!urls.length) throw fail(400, 'invalid_url', 'Escribe al menos un link válido, por ejemplo marca.com');
+  const j = (await q("select id, progress from jobs where org_id = $1 and type = 'quick' order by created_at desc limit 1", [req.params.org])).rows[0];
+  if (!j) throw fail(404, 'not_found', 'No hay análisis.');
+  const p = j.progress || {};
+  const tried = (p.tried || []).filter((u) => !urls.includes(u));
+  await q("update jobs set status = 'queued', error = null, lease_until = null, updated_at = now(), progress = $2 where id = $1", [j.id, { ...p, phase: 'comps', manual: true, tried, candidates: urls.map((u) => ({ name: TPI.ingest.hostOf(u), url: u })) }]);
+  res.json({ ok: true });
+}));
 app.get('/api/admin/quick', auth, titaOnly, wrap(async (req, res) => {
   res.json((await q(`select o.id, o.name, o.meta->>'url' as url, o.created_at, o.expires_at,
       (select status from jobs j where j.org_id = o.id and j.type = 'quick' order by created_at desc limit 1) as status,

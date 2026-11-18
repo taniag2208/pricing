@@ -47,6 +47,7 @@ function anthropic(port, log) {
       const text = typeof last.content === 'string' ? last.content : last.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
       let content, stop = 'end_turn';
       if (j.tools && j.tools.length && String(j.tools[0].type || '').startsWith('web_search')) {
+        if (anthropic.noComps) { log.push({ search: 'nocomps' }); content = [{ type: 'text', text: JSON.stringify({ country: 'CO', storeName: 'Marca Propia', competitors: [{ name: 'Muerta 1', url: 'http://127.0.0.1:4998' }, { name: 'Muerta 2', url: 'http://127.0.0.1:4997' }] }) }]; } else
         content = [{ type: 'text', text: JSON.stringify({ country: 'CO', storeName: 'Marca Propia', competitors: [{ name: 'Alfa', url: 'http://127.0.0.1:4102' }, { name: 'Sin catálogo', url: 'http://127.0.0.1:4999' }, { name: 'Beta', url: 'http://127.0.0.1:4103' }, { name: 'Gama', url: 'http://127.0.0.1:4104' }] }) }];
       } else if (j.tools && j.tools.length) {
         const hasResult = Array.isArray(last.content) && last.content.some((b) => b.type === 'tool_result');
