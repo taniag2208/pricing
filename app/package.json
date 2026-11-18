@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node server/index.js",
     "migrate": "node server/migrate.js",
-    "test:e2e": "node test/e2e.js"
+    "test:e2e": "node test/e2e.js",
+    "test:unit": "node test/math.js && node test/crawl.js"
   },
   "engines": { "node": ">=20" },
   "dependencies": {

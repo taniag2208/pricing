@@ -15,10 +15,19 @@ function catalog(name, n, eff, lvl, seed) {
   products.push({ id: 999, title: 'Llavero metálico ' + name, handle: 'llavero', body_html: 'Accesorio', product_type: 'Accesorios', tags: [], variants: [{ price: '59900.00', sku: 'LL', available: true }] });
   return products;
 }
-function store(port, name, n, eff, lvl) {
+function store(port, name, n, eff, lvl, mode) {
   const all = catalog(name, n, eff, lvl, port);
   const srv = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
+    // Modo 'ld': sin API pública (robots la bloquea); solo sitemap y páginas con datos estructurados schema.org
+    if (mode === 'ld') {
+      if (u.pathname === '/robots.txt') { res.end('User-agent: *\nDisallow: /api/\nDisallow: /products.json\nSitemap: http://127.0.0.1:' + port + '/sitemap.xml\n'); return; }
+      if (u.pathname === '/sitemap.xml') { res.end('<?xml version="1.0"?><sitemapindex><sitemap><loc>http://127.0.0.1:' + port + '/sitemap/product-0.xml</loc></sitemap><sitemap><loc>http://127.0.0.1:' + port + '/sitemap/brand-0.xml</loc></sitemap></sitemapindex>'); return; }
+      if (u.pathname === '/sitemap/product-0.xml') { res.end('<urlset>' + all.map((p) => '<url><loc>http://127.0.0.1:' + port + '/' + p.handle + '-' + p.title.toLowerCase().replace(/\W+/g, '-') + '/p</loc></url>').join('') + '</urlset>'); return; }
+      const m = u.pathname.match(/^\/(p-\d+|llavero)-.*\/p$/);
+      if (m) { const p = all.find((x) => x.handle === m[1]); const v = p.variants[0]; const ld = { '@context': 'https://schema.org', '@type': 'Product', name: p.title, sku: v.sku, description: p.body_html.replace(/<[^>]+>/g, ''), offers: { '@type': 'AggregateOffer', lowPrice: Number(v.price), offers: [{ '@type': 'Offer', price: Number(v.price), availability: 'https://schema.org/InStock', priceSpecification: v.compare_at_price ? [{ '@type': 'UnitPriceSpecification', priceType: 'https://schema.org/ListPrice', price: Number(v.compare_at_price) }] : [] }] } }; const bc = { '@type': 'BreadcrumbList', itemListElement: [{ name: 'Inicio' }, { name: p.product_type }, { name: p.title }] }; res.setHeader('Content-Type', 'text/html'); res.end('<html><head><script type="application/ld+json">' + JSON.stringify(ld) + '</script><script type="application/ld+json">' + JSON.stringify(bc) + '</script></head><body>x</body></html>'); return; }
+      res.statusCode = 404; res.end('no'); return;
+    }
     if (u.pathname === '/robots.txt') { res.end('User-agent: *\nDisallow: /admin\n'); return; }
     if (u.pathname === '/products.json') {
       const page = Number(u.searchParams.get('page') || 1), lim = 25;
@@ -46,7 +55,7 @@ function anthropic(port, log) {
       const last = j.messages[j.messages.length - 1];
       const text = typeof last.content === 'string' ? last.content : last.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
       let content, stop = 'end_turn';
-      if (j.tools && j.tools.length && String(j.tools[0].type || '').startsWith('web_search')) {
+      if ((j.tools && j.tools.length && String(j.tools[0].type || '').startsWith('web_search')) || /sonar/.test(j.model || '')) {
         if (anthropic.noComps) { log.push({ search: 'nocomps' }); content = [{ type: 'text', text: JSON.stringify({ country: 'CO', storeName: 'Marca Propia', competitors: [{ name: 'Muerta 1', url: 'http://127.0.0.1:4998' }, { name: 'Muerta 2', url: 'http://127.0.0.1:4997' }] }) }]; } else
         content = [{ type: 'text', text: JSON.stringify({ country: 'CO', storeName: 'Marca Propia', competitors: [{ name: 'Alfa', url: 'http://127.0.0.1:4102' }, { name: 'Sin catálogo', url: 'http://127.0.0.1:4999' }, { name: 'Beta', url: 'http://127.0.0.1:4103' }, { name: 'Gama', url: 'http://127.0.0.1:4104' }] }) }];
       } else if (j.tools && j.tools.length) {

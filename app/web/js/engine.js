@@ -171,11 +171,13 @@
     if (!f0) return { ...base, ok: false, reason: 'calidad', n: pool.length };
     const res0 = data.map((d) => d.y - dot(d.x, f0.beta));
     const med0 = median(res0), mad = median(res0.map((r) => Math.abs(r - med0))) * 1.4826;
-    const excluded = data.filter((d, i) => Math.abs(res0[i] - med0) > 3.5 * mad).map((d) => d.p);
-    data = data.filter((d, i) => Math.abs(res0[i] - med0) <= 3.5 * mad);
+    const cut = 3.5 * Math.max(mad, 1e-6);
+    const excluded = data.filter((d, i) => Math.abs(res0[i] - med0) > cut).map((d) => d.p);
+    data = data.filter((d, i) => Math.abs(res0[i] - med0) <= cut);
     const n = data.length;
     if (n < need) return { ...base, ok: false, reason: 'muestra', n, excluded };
     const fit = ols(data.map((d) => d.x), data.map((d) => d.y), 0.01);
+    if (!fit) return { ...base, ok: false, reason: 'calidad', n, excluded };
     const yhat = data.map((d) => dot(d.x, fit.beta));
     const ym = mean(data.map((d) => d.y));
     const sst = sum(data.map((d) => (d.y - ym) ** 2));
@@ -185,16 +187,21 @@
     // validación cruzada en 5 particiones (orden determinístico por hash del id)
     const order = data.map((d, i) => [hashStr(d.p.id), i]).sort((a, b) => a[0] - b[0]).map((x) => x[1]);
     const cvRes = Array(n).fill(0);
+    let inBand = 0;
     for (let f = 0; f < 5; f++) {
       const test = new Set(order.filter((_, j) => j % 5 === f));
       const tr = data.filter((_, i) => !test.has(i));
       const ff = ols(tr.map((d) => d.x), tr.map((d) => d.y), 0.01);
-      test.forEach((i) => (cvRes[i] = data[i].y - dot(data[i].x, ff.beta)));
+      if (!ff) return { ...base, ok: false, reason: 'calidad', n, excluded };
+      // cobertura honesta: banda con los residuos del entrenamiento de la partición, evaluada en la partición de prueba
+      const trRes = tr.map((d) => d.y - dot(d.x, ff.beta));
+      const a = quantile(trRes, 0.1), b = quantile(trRes, 0.9);
+      test.forEach((i) => { cvRes[i] = data[i].y - dot(data[i].x, ff.beta); if (cvRes[i] >= a && cvRes[i] <= b) inBand++; });
     }
     const r2cv = 1 - sum(cvRes.map((r) => r * r)) / sst;
     const mape = mean(cvRes.map((r) => Math.abs(Math.exp(-r) - 1)));
     const q10 = quantile(cvRes, 0.1), q90 = quantile(cvRes, 0.9);
-    const coverage = mean(cvRes.map((r) => (r >= q10 && r <= q90 ? 1 : 0)));
+    const coverage = inBand / n;
     const coef = idx.map((ai, j) => {
       const b = fit.beta[j + 1], se = Math.sqrt(Math.max(0, s2 * fit.inv[j + 1][j + 1]));
       return { attr: cat.attrs[ai], b, se, pct: Math.exp(b) - 1, lo: Math.exp(b - 1.645 * se) - 1, hi: Math.exp(b + 1.645 * se) - 1, sig: Math.abs(b) > 1.645 * se };
@@ -225,10 +232,14 @@
     const sameTyp = a.typ === b.typ;
     const sameMat = a.mat === b.mat;
     const diffs = a.lv.map((v, i) => b.lv[i] - v);
-    const mad = mean(diffs.map(Math.abs));
-    const score = (sameTyp ? 0.4 : 0.05) + (sameMat ? 0.15 : 0.04) + 0.45 * (1 - mad / 4);
-    const shared = cat.attrs.filter((_, i) => diffs[i] === 0).map((x) => x.name);
-    const differ = cat.attrs.map((x, i) => ({ attr: x, d: diffs[i] })).filter((x) => Math.abs(x.d) >= 1);
+    // solo cuentan los atributos con evidencia en ambos productos (los imputados con la mediana no prueban parecido)
+    const known = a.lv.map((_, i) => !(a.lvRaw && !(a.lvRaw[i] >= 1)) && !(b.lvRaw && !(b.lvRaw[i] >= 1)));
+    const kd = diffs.filter((_, i) => known[i]);
+    const mad = kd.length ? mean(kd.map(Math.abs)) : 2;
+    const cover = a.lv.length ? kd.length / a.lv.length : 0;
+    const score = (sameTyp ? 0.4 : 0.05) + (sameMat ? 0.15 : 0.04) + 0.45 * (1 - mad / 4) * (0.5 + 0.5 * cover);
+    const shared = cat.attrs.filter((_, i) => known[i] && diffs[i] === 0).map((x) => x.name);
+    const differ = cat.attrs.map((x, i) => ({ attr: x, d: diffs[i] })).filter((x, i) => known[i] && Math.abs(x.d) >= 1);
     const label = score >= 0.85 ? 'Muy similar' : score >= 0.72 ? 'Similar' : 'Parcial';
     let conf = 'Clasificación con evidencia completa';
     if (!b.hasDesc && !b.matPublic) conf = 'Atributos inferidos solo de imagen';
@@ -257,7 +268,7 @@
   /* ---------- diagnóstico por producto ---------- */
   TP.diagnose = function (cat, model, p, comps, policy, mk) {
     const out = { p, comps };
-    const cm = comps.length ? median(comps.map((c) => c.q.list)) : NaN;
+    let cm = comps.length ? median(comps.map((c) => c.q.list)) : NaN;
     out.compMedian = cm;
     out.gapComp = comps.length >= 2 ? p.list / cm - 1 : NaN;
     if (model && model.ok) {
@@ -270,11 +281,21 @@
     if (out.pos === 'below') { out.action = 'up'; out.evidence = agreeUp ? 'consistente' : 'mixta'; }
     else if (out.pos === 'above') { out.action = 'down'; out.evidence = agreeDown ? 'consistente' : 'mixta'; }
     else if (out.pos === 'in') { out.action = 'keep'; out.evidence = 'consistente'; }
-    else { out.action = isFinite(out.gapComp) && Math.abs(out.gapComp) >= 0.15 ? (out.gapComp < 0 ? 'up' : 'down') : 'keep'; out.evidence = 'solo comparables'; }
+    else {
+      // Sin modelo: solo se sugiere un cambio con al menos 3 comparables cercanos y si el precio queda fuera de su rango central (P25–P75).
+      const close = comps.filter((c) => c.s.score >= 0.75).map((c) => c.q.list);
+      out.compRange = close.length >= 3 ? [quantile(close, 0.25), quantile(close, 0.75)] : null;
+      if (!out.compRange) out.action = 'keep';
+      else out.action = p.list < out.compRange[0] * 0.97 ? 'up' : p.list > out.compRange[1] * 1.03 ? 'down' : 'keep';
+      if (out.compRange) { out.compMedian = cm = median(close); out.gapComp = p.list / cm - 1; }
+      out.evidence = out.compRange ? 'solo comparables' : 'insuficiente';
+    }
     const mc = policy.maxChange;
-    if (out.action === 'up') out.scenario = TP.roundPrice(Math.min(isFinite(out.est) ? out.est : cm, p.list * (1 + mc)), mk, policy.rounding);
-    else if (out.action === 'down') out.scenario = TP.roundPrice(Math.max(isFinite(out.est) ? out.est : cm, p.list * (1 - mc)), mk, policy.rounding);
+    const stepOf = policy.rounding === 'multiplo' ? mk.step : mk.id === 'CO' || mk.id === 'CL' ? 1000 : mk.id === 'MX' ? 10 : 1;
+    if (out.action === 'up') { out.scenario = TP.roundPrice(Math.min(isFinite(out.est) ? out.est : cm, p.list * (1 + mc)), mk, policy.rounding); if (!(out.scenario > p.list)) out.scenario = TP.roundPrice(p.list + stepOf, mk, policy.rounding); }
+    else if (out.action === 'down') { out.scenario = TP.roundPrice(Math.max(isFinite(out.est) ? out.est : cm, p.list * (1 - mc)), mk, policy.rounding); if (!(out.scenario < p.list)) out.scenario = TP.roundPrice(p.list - stepOf, mk, policy.rounding); }
     else out.scenario = p.list;
+    if (out.action !== 'keep' && Math.abs(out.scenario / p.list - 1) < 0.01) { out.action = 'keep'; out.scenario = p.list; }
     out.floor = policy.useCost && p.cost != null ? TP.roundPrice(p.cost / (1 - policy.minMargin), mk, policy.rounding) : null;
     if (out.floor && out.scenario < out.floor) out.scenario = out.floor;
     const mag = isFinite(out.gap) ? Math.abs(out.gap) : isFinite(out.gapComp) ? Math.abs(out.gapComp) * 0.6 : 0;
@@ -340,21 +361,23 @@
     const best = pts.reduce((a, b) => (b.rev > a.rev ? b : a), pts[0]);
     return { pts, best, n };
   };
-  // Conjoint por calificación: 4 atributos (niveles 1/3/5) + 3 precios, 12 perfiles balanceados
+  // Conjoint por calificación: 4 atributos (niveles 1/3/5) + 3 precios en un arreglo ortogonal L18 (Taguchi):
+  // cada par de factores aparece en todas sus combinaciones el mismo número de veces, así los efectos se estiman por separado.
+  const L18 = ['11111', '12222', '13333', '21122', '22233', '23311', '31213', '32321', '33132', '11332', '12113', '13221', '21231', '22312', '23123', '31323', '32131', '33212'];
   TP.conjointDesign = function (cat, prices, seed) {
     const r = rng(seed || 7);
     const attrs = cat.attrs.slice(0, 4);
     const lv = [1, 3, 5];
-    const profiles = [];
-    for (let i = 0; i < 12; i++) profiles.push({ id: 'P' + (i + 1), lv: attrs.map((_, j) => lv[(i + j * (1 + (i % 3))) % 3]), price: (i * 2 + Math.floor(i / 3)) % 3 });
+    const profiles = L18.map((row, i) => ({ id: 'P' + (i + 1), lv: attrs.map((_, j) => lv[Number(row[j]) - 1]), price: Number(row[4]) - 1 }));
     for (let i = profiles.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [profiles[i], profiles[j]] = [profiles[j], profiles[i]]; }
+    profiles.forEach((p, i) => (p.id = 'P' + (i + 1)));
     return { attrs: attrs.map((a) => ({ id: a.id, name: a.name, levels: [a.levels[0], a.levels[2], a.levels[4]] })), prices, profiles };
   };
-  // ratings: [[nota P1..P12 en el orden del diseño (0-10)], ...]
+  // ratings: [[nota de cada perfil en el orden del diseño (0-10)], ...]
   TP.conjointEstimate = function (design, ratings) {
     const resp = ratings.filter((r) => r.length >= design.profiles.length && r.every((v) => v >= 0 && v <= 10));
     const n = resp.length;
-    if (n < 20) return { n, error: 'Se necesitan al menos 20 encuestados con las 12 calificaciones; hay ' + n + '.' };
+    if (n < 20) return { n, error: 'Se necesitan al menos 20 encuestados con las ' + design.profiles.length + ' calificaciones; hay ' + n + '.' };
     const X = [], y = [];
     resp.forEach((r) => design.profiles.forEach((p, k) => {
       const row = [1];
@@ -362,7 +385,7 @@
       row.push(p.price === 1 ? 1 : 0, p.price === 2 ? 1 : 0);
       X.push(row); y.push(r[k]);
     }));
-    const f = ols(X, y, 0.001);
+    const f = ols(X, y, 0);
     if (!f) return { n, error: 'El diseño no permite estimar las utilidades.' };
     const b = f.beta;
     const center = (arr) => { const m = mean(arr); return arr.map((v) => v - m); };
@@ -391,7 +414,9 @@
     if (Math.abs(ch) < 0.005) return { error: 'El cambio de precio es demasiado pequeño para medir elasticidad.' };
     const e = did / ch;
     const sd = (a) => Math.sqrt(mean(a.map((v) => (v - mean(a)) ** 2)) / Math.max(1, a.length));
-    const seLog = Math.sqrt((sd(pre.map((x) => x.u)) / m(pre.map((x) => x.u))) ** 2 + (sd(post.map((x) => x.u)) / m(post.map((x) => x.u))) ** 2);
+    // error estándar por método delta de las cuatro medias (tratado y control, antes y después); no corrige autocorrelación semanal
+    const rel = (a) => sd(a) / m(a);
+    const seLog = Math.sqrt(rel(pre.map((x) => x.u)) ** 2 + rel(post.map((x) => x.u)) ** 2 + rel(cpre) ** 2 + rel(cpost) ** 2);
     const se = Math.abs(seLog / ch);
     const weeks = [...new Set([...tr.map((x) => x.t), ...cs.flat().map((x) => x.t)])].sort((a, b) => a - b);
     const ctlAt = (t) => mean(cs.map((s) => (s.find((x) => x.t === t) || {}).u).filter((v) => v != null));

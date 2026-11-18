@@ -47,6 +47,8 @@
     avail: o.avail == null ? null : !!o.avail,
   });
 
+  I.mkItem = (o) => mk(o);
+
   /* ---------- enlaces a los catálogos públicos de cada plataforma ---------- */
   I.links = function (origin) {
     return [
@@ -244,7 +246,7 @@
       'Reglas:\n1. Entre 2 y 7 categorías basadas en el catálogo PROPIO; cada una debe agrupar productos comparables entre sí (mismo uso). No mezcles productos de usos distintos.\n' +
       '2. Para cada categoría: "name" (español), "short" (1-2 palabras), "synonyms" (5-10 palabras en minúscula y singular que otras tiendas usan para esa categoría, incluido inglés), "typologies" (3-7 tipos de producto), "materials" (3-6), "colors" (4-8 colores estándar).\n' +
       '3. "attributes": 4 a 6 atributos que el cliente percibe y que explican diferencias de precio. El PRIMERO siempre es la calidad del material principal. Cada atributo con exactamente 5 "levels" ordenados del menor al mayor valor, de 2 a 6 palabras, concretos y verificables en una ficha o foto.\n' +
-      '4. No uses nombres de marcas en categorías ni niveles.\n\n' +
+      '4. Si el precio depende sobre todo del tamaño, capacidad o presentación (por ejemplo, colchones sencillo/doble/queen/king, volumen, número de piezas), uno de los atributos DEBE ser ese tamaño, con 5 niveles del más pequeño al más grande.\n5. No uses nombres de marcas en categorías ni niveles.\n\n' +
       'Responde solo JSON: {"categories":[{"name","short","synonyms":[],"typologies":[],"materials":[],"colors":[],"attributes":[{"name","levels":["","","","",""]}]}]}\n\n' +
       'CATÁLOGO PROPIO por etiqueta (cantidad: ejemplos):\n' + labelSummary(own, 40) + '\n\nEJEMPLOS DE FICHAS PROPIAS:\n' + ex + '\n\nETIQUETAS DE LA COMPETENCIA:\n' + labelSummary(comps, 40),
       { signal, kind: 'propose' });
@@ -332,14 +334,25 @@
     const items = I.allItems(ws), cm = I.classMap(ws), lm = I.labelMap(ws), pm = I.privMap(ws);
     const products = [];
     let pending = 0;
+    // Base de comparación: el precio al que hoy se vende (con promoción si la hay). Muchas tiendas publican "precios de lista"
+    // inflados con descuentos permanentes; compararlos haría ver a quien no los usa como mucho más barato.
+    const basis = cfg.priceBasis === 'list' ? 'list' : 'sale';
+    const BUNDLE = /(^|[\s:(])(combo|kit|juego de|pack|set|paquete|obsequio|regalo)\b|\s\+\s/i;
+    const excluded = { bundle: 0, gift: 0 };
+    const sidMed = {};
+    Object.values(items).forEach((it) => { (sidMed[it.sid] = sidMed[it.sid] || []).push(it.price); });
+    Object.keys(sidMed).forEach((k) => (sidMed[k] = TP.median(sidMed[k])));
     Object.values(items).forEach((it) => {
       if (!stores[it.sid]) return;
       const c = cm[it.pid];
       if (!c) { if (lm[it.sid + '|' + it.label] !== null) pending++; return; }
+      const sale = it.promo && it.promo < it.price ? it.promo : it.price;
+      if (!(sale > 0) || sale < 0.03 * (sidMed[it.sid] || 0)) { excluded.gift++; return; }
+      if (cfg.keepBundles !== true && BUNDLE.test(' ' + it.name)) { excluded.bundle++; return; }
       const cat = c.cat ? catById[c.cat] : null;
       if (c.cat && !cat) { pending++; return; }
       const labelKey = it.sid + '|' + it.label;
-      const p = { id: it.pid, brand: it.sid === 'own' ? 'own' : it.sid, label: labelKey, cat: cat ? cat.id : null, srcCat: lm[labelKey] && lm[labelKey] !== 'mixed' ? lm[labelKey] : null, typ: c.typ || 'Otro', mat: c.mat || '—', color: c.color || '—', lvRaw: cat ? (c.lv || []).slice(0, cat.attrs.length) : [], list: it.price, promo: it.promo, name: it.name, url: it.url, hasDesc: !!it.desc, matPublic: true, conf: c.conf, ev: c.ev, fixed: !!c.fixed, collection: it.label, season: null, sku: it.sku };
+      const p = { id: it.pid, brand: it.sid === 'own' ? 'own' : it.sid, label: labelKey, cat: cat ? cat.id : null, srcCat: lm[labelKey] && lm[labelKey] !== 'mixed' ? lm[labelKey] : null, typ: c.typ || 'Otro', mat: c.mat || '—', color: c.color || '—', lvRaw: cat ? (c.lv || []).slice(0, cat.attrs.length) : [], list: basis === 'sale' ? sale : it.price, promo: basis === 'sale' ? null : it.promo, tagList: it.promo && it.promo < it.price ? it.price : null, name: it.name, url: it.url, hasDesc: !!it.desc, matPublic: true, conf: c.conf, ev: c.ev, fixed: !!c.fixed, collection: it.label, season: null, sku: it.sku };
       if (p.brand === 'own') {
         const pr = (it.sku && pm[strip(it.sku)]) || pm[strip(it.name)];
         if (pr) { if (pr.cost > 0) p.cost = pr.cost; if (pr.sold != null && pr.planned > 0) p.st = TP.clamp(pr.sold / pr.planned, 0, 1.5); if (pr.weekly != null) p.units = pr.weekly; }
@@ -355,7 +368,7 @@
     const labels = {};
     products.forEach((p) => { const l = (labels[p.label] = labels[p.label] || { key: p.label, brand: p.brand, name: p.label.split('|').slice(1).join('|'), comp: {}, ids: [] }); l.ids.push(p.id); const k = p.cat || '_x'; l.comp[k] = (l.comp[k] || 0) + 1; });
     const byId = Object.fromEntries(products.map((p) => [p.id, p]));
-    return { mk: mkt, cats, catById, brands, brandById: Object.fromEntries(brands.map((b) => [b.id, b])), products, byId, labels: Object.values(labels), pending, totalItems: Object.keys(items).length, V: { collections: [...new Set(products.filter((p) => p.brand === 'own').map((p) => p.collection))].slice(0, 12) } };
+    return { mk: mkt, cats, catById, brands, brandById: Object.fromEntries(brands.map((b) => [b.id, b])), products, byId, labels: Object.values(labels), pending, excluded, basis, totalItems: Object.keys(items).length, V: { collections: [...new Set(products.filter((p) => p.brand === 'own').map((p) => p.collection))].slice(0, 12) } };
   };
 
   // productos candidatos a clasificar: no clasificados y en etiquetas mapeadas a alguna categoría (o mixtas / sin mapear)

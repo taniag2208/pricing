@@ -10,6 +10,14 @@ const TP = require('./shared');
 const I = TP.ingest;
 
 const CHUNK = 150;
+// Palabras que describen el catálogo propio (tipos de producto), para leer de la competencia solo lo comparable.
+const STOP = new Set('para con sin por los las del una uno unos unas este esta mujer hombre hombres mujeres nino nina ninos ninas unisex talla tallas color negro negra blanco blanca azul rojo roja gris cafe beige verde rosa dorado plata nuevo nueva coleccion referencia producto productos tienda oferta descuento envio gratis pack combo kit set categoria inicio home sale liquidacion'.split(' '));
+function keywordsOf(items) {
+  const n = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const cnt = {};
+  items.forEach((p) => { const seen = new Set(); (n(p.label) + ' ' + n(p.name).split(/\s+/).slice(0, 3).join(' ')).split(/[^a-z]+/).forEach((w) => { if (w.length < 4 || STOP.has(w) || seen.has(w)) return; seen.add(w); cnt[w] = (cnt[w] || 0) + 1; }); });
+  return Object.entries(cnt).filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]).slice(0, 25).map(([w]) => (w.length > 5 && /s$/.test(w) ? w.slice(0, -1) : w));
+}
 const needComps = () => Object.assign(new Error('No encontramos competidores con un catálogo público que podamos leer. Escribe los links de 2 a 5 competidores y seguimos con el análisis.'), { code: 'need_comps' });
 const BATCH = Number(process.env.CLASSIFY_BATCH || ((process.env.AI_PROVIDER || '').toLowerCase() === 'gateway' ? 20 : 40));
 const MAX_BATCHES = Number(process.env.CLASSIFY_MAX_BATCHES || 150);
@@ -120,8 +128,11 @@ const RUN = {
     if (phase === 'own') {
       const s = await store.get(org, 'stores', 'own');
       let res;
-      try { res = await crawl(s.url, null, { maxPages: Number(process.env.QUICK_OWN_PAGES || 3) }); }
-      catch (e) { throw new Error('No pudimos leer el catálogo público de ' + s.url + '. El análisis funciona con tiendas Shopify, WooCommerce o VTEX que publican su catálogo.'); }
+      try { res = await crawl(s.url, null, { maxPages: Number(process.env.QUICK_OWN_PAGES || 3), sitemapMax: Number(process.env.QUICK_OWN_MAX || 90), deadline: job.deadline - 60000 }); }
+      catch (e) {
+        if (e.code === 'unreachable') throw new Error('No pudimos conectarnos con ' + s.url + '. Revisa que la dirección esté bien escrita.');
+        throw new Error('No pudimos leer el catálogo de ' + s.url + ': la tienda no publica su catálogo en un formato abierto o su robots.txt no lo permite.');
+      }
       const items = cap(res.items, Number(process.env.QUICK_OWN_MAX || 90));
       if (items.length < 8) throw new Error('La tienda publica muy pocos productos (' + items.length + ') para analizar.');
       const chunks = await saveCatalog(org, 'own', items, 0);
@@ -157,15 +168,21 @@ const RUN = {
     if (phase === 'comps') {
       const found = st.found || [], tried = st.tried || [];
       const want = Number(process.env.QUICK_COMPS || 5);
+      if (!st.keywords) {
+        const wsk = await store.snapshot(org);
+        const own = Object.values(wsk.catalog).filter((c) => c.sid === 'own').flatMap((c) => c.items || []);
+        await save({ keywords: keywordsOf(own) });
+      }
       const todo = st.candidates.filter((c) => !tried.includes(c.url));
-      for (let i = 0; i < todo.length && found.length < want && Date.now() < job.deadline - 45000; i += 4) {
+      for (let i = 0; i < todo.length && found.length < want && Date.now() < job.deadline - 100000; i += 4) {
         const group = todo.slice(i, i + 4);
         group.forEach((c) => tried.push(c.url));
-        const got = await Promise.all(group.map((c) => crawl(c.url, null, { maxPages: 1 }).then((res) => ({ c, res }), () => null)));
+        const copts = { maxPages: Number(process.env.QUICK_COMP_PAGES || 6), enough: 150, keywords: st.keywords, sitemapMax: 50, deadline: job.deadline - 60000 };
+        const got = await Promise.all(group.map((c) => crawl(c.url, null, copts).then((res) => ({ c, res }), () => null)));
         for (const g of got) {
           if (!g || g.res.items.length < 10 || found.length >= want) continue;
           let sid = slug(g.c.name); if (sid === 'own' || found.some((f) => f.sid === sid)) sid += '-' + found.length;
-          const items = cap(g.res.items, Number(process.env.QUICK_COMP_MAX || 55));
+          const items = cap(g.res.items, Number(process.env.QUICK_COMP_MAX || 120));
           const chunks = await saveCatalog(org, sid, items, 0);
           await store.put(org, 'stores', sid, { name: g.c.name, url: g.res.origin, role: 'comp', n: items.length, chunks, platform: g.res.platform, importedAt: new Date().toISOString() }, 'sistema');
           found.push({ sid, name: g.c.name, n: items.length });

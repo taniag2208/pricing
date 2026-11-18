@@ -48,6 +48,13 @@ npm run test:e2e   # Postgres embebido + tiendas y API de Claude simuladas + nav
 ## IA sin costo (Vercel AI Gateway)
 Con `AI_PROVIDER=gateway` el servidor usa Vercel AI Gateway en lugar de la API de Anthropic. En Vercel se autentica solo (token OIDC del despliegue, sin API key) y consume los créditos gratuitos de AI Gateway que Vercel da cada mes (US$5). El plan gratuito no incluye los modelos Claude, por eso el modelo por defecto en este modo es `google/gemini-2.5-flash` (cambiable con `AI_MODEL`). Fuera de Vercel se usa `AI_GATEWAY_API_KEY`. Para volver a Claude directo: quita `AI_PROVIDER` y define `ANTHROPIC_API_KEY` con saldo.
 
+## Cómo se leen y comparan los precios
+- **Lectura de catálogos:** primero la API pública de la plataforma (Shopify, WooCommerce, VTEX); si no existe o el robots.txt de la tienda la bloquea, el sitemap de productos y los datos estructurados schema.org de cada ficha (funciona en casi cualquier plataforma). Se prueba el dominio con y sin `www`.
+- **Competidores:** en el modo gateway los busca Perplexity Sonar (búsqueda web real); se leen solo los productos cuyo nombre o categoría coincide con el vocabulario del catálogo propio. Si no aparecen competidores legibles, el usuario escribe sus links.
+- **Precio de comparación:** el precio de venta actual (con promoción si la hay), no el precio de lista tachado; `priceBasis: 'list'` en la configuración de la cuenta vuelve al precio de lista. Combos, sets y obsequios quedan fuera de la comparación.
+- **Sin modelo hedónico** (muestra insuficiente), una sugerencia de cambio exige al menos 3 comparables cercanos y que el precio quede fuera de su rango P25–P75.
+- `npm run test:unit` valida el motor con datos simulados de parámetros conocidos (hedónico, conjoint L18, Van Westendorp, diferencias en diferencias) y el lector de catálogos.
+
 ## Variables
 Ver `.env.example`. Las más importantes: `DATABASE_URL`, `SESSION_SECRET`, `ANTHROPIC_API_KEY`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `REFRESH_CRON` (por defecto 5:17 a. m. hora de Bogotá), `AI_MODEL`.
 

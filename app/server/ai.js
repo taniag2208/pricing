@@ -39,12 +39,12 @@ function mapError(e) {
   return err('upstream_error', (e && e.message) || 'Error desconocido');
 }
 
-async function call({ messages, system, tools, tier, maxTokens, orgId, userId, kind }) {
+async function call({ messages, system, tools, tier, maxTokens, orgId, userId, kind, model }) {
   const client = getClient();
   if (!client) throw err('sampling_disabled', 'La IA no está configurada en el servidor.');
-  const req = { model: MODEL, max_tokens: maxTokens || 16000, messages };
+  const req = { model: model || MODEL, max_tokens: maxTokens || 16000, messages };
   // En el gateway: sin razonamiento extendido (consume el límite de salida en modelos como Gemini) y con más margen.
-  if (GATEWAY) { req.max_tokens = Math.max(req.max_tokens, Number(process.env.AI_GATEWAY_MAX_TOKENS || 32000)); if (process.env.AI_THINKING !== 'on') req.thinking = { type: 'disabled' }; }
+  if (GATEWAY) { if (!model) req.max_tokens = Math.max(req.max_tokens, Number(process.env.AI_GATEWAY_MAX_TOKENS || 32000)); if (process.env.AI_THINKING !== 'on') req.thinking = { type: 'disabled' }; }
   if (!GATEWAY) Object.assign(req, { output_config: { effort: EFFORT[tier] || 'medium' }, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' });
   if (system) req.system = system;
   if (tools && tools.length) req.tools = tools;
@@ -79,6 +79,11 @@ async function json(prompt, opts = {}) {
 
 // Investigación con búsqueda web (herramienta de servidor de Anthropic); reanuda turnos pausados.
 async function research(prompt, opts = {}) {
+  // En el gateway, la búsqueda la hace un modelo con búsqueda web propia (Perplexity Sonar, incluido en el plan gratuito).
+  if (GATEWAY) {
+    const res = await call({ messages: [{ role: 'user', content: prompt }], model: process.env.AI_SEARCH_MODEL || 'perplexity/sonar', maxTokens: 4000, orgId: opts.orgId, userId: opts.userId, kind: opts.kind || 'research' });
+    return parseJson(textOf(res));
+  }
   let messages = [{ role: 'user', content: prompt }];
   let res;
   for (let i = 0; i < 4; i++) {
