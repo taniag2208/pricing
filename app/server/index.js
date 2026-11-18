@@ -23,7 +23,11 @@ const SEG = /^[A-Za-z0-9_\-.~:@+]{1,200}$/;
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
-app.use(express.json({ limit: '12mb' }));
+// En serverless (Vercel) las migraciones y el administrador inicial se preparan en la primera petición.
+let booted = null;
+const boot = () => booted || (booted = bootstrap().catch((e) => { booted = null; throw e; }));
+app.use((req, res, next) => (req.path.startsWith('/api/') || req.path === '/healthz' ? boot().then(() => next(), (e) => { console.error(e); res.status(503).json({ code: 'db_unavailable', error: 'Base de datos no disponible.' }); }) : next()));
+app.use(express.json({ limit: '4mb' }));
 app.use(cookieParser());
 app.use((req, res, next) => {
   res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin', 'X-Frame-Options': 'DENY',
@@ -192,6 +196,18 @@ app.post('/api/orgs/:org/jobs', auth, titaOnly, wrap(async (req, res) => {
   if (!['ingest', 'propose', 'map', 'classify', 'refresh'].includes(type)) throw fail(400, 'invalid', 'Tipo de trabajo inválido.');
   if (type !== 'ingest' && type !== 'refresh' && !ai.configured()) throw fail(400, 'sampling_disabled', 'Falta configurar ANTHROPIC_API_KEY en el servidor.');
   res.json({ id: await jobs.enqueue(req.params.org, type, params || {}, req.user.id) });
+}));
+
+app.post('/api/orgs/:org/jobs/pump', auth, titaOnly, wrap(async (req, res) => {
+  const id = await jobs.step(req.params.org);
+  res.json({ ran: id });
+}));
+// Cron de Vercel: actualización diaria y avance de la cola. Vercel envía Authorization: Bearer CRON_SECRET.
+app.get('/api/cron', wrap(async (req, res) => {
+  if (!process.env.CRON_SECRET || req.get('authorization') !== 'Bearer ' + process.env.CRON_SECRET) throw fail(401, 'unauthorized', 'No autorizado.');
+  const orgs = await jobs.enqueueRefreshAll();
+  const steps = await jobs.drain(null, Number(process.env.CRON_BUDGET_MS || 270000));
+  res.json({ orgs, steps });
 }));
 
 /* ---------- Claude ---------- */

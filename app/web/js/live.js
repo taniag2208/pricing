@@ -79,13 +79,15 @@
     const [jobs, setJobs] = useState([]);
     useEffect(() => {
       if (!enabled) return undefined;
-      let alive = true, timer = null, was = false;
+      let alive = true, timer = null, was = false, pumping = false;
       const pull = async () => {
         let running = false;
         try { const r = await L.api('GET', '/orgs/' + org + '/jobs'); if (alive) setJobs(r); running = r.some((j) => j.status === 'queued' || j.status === 'running'); } catch (e) { /* reintenta */ }
         if (alive) timer = setTimeout(pull, running ? 2500 : 10000);
         if ((running || was) && L.refresh) L.refresh();
         was = running;
+        // En serverless los trabajos avanzan cuando alguien los impulsa: la consola de Tita da un paso a la vez.
+        if (running && alive && !pumping) { pumping = true; L.api('POST', '/orgs/' + org + '/jobs/pump').catch(() => {}).finally(() => { pumping = false; if (alive) { clearTimeout(timer); pull(); } }); }
       };
       pull();
       L.pullJobs = () => { clearTimeout(timer); pull(); };

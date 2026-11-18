@@ -4,7 +4,8 @@ const { Pool } = require('pg');
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
-  max: Number(process.env.DATABASE_POOL || 10),
+  max: Number(process.env.DATABASE_POOL || (process.env.VERCEL ? 3 : 10)),
+  idleTimeoutMillis: 10000,
 });
 
 const SCHEMA = `
@@ -50,6 +51,7 @@ create table if not exists jobs (
   updated_at timestamptz not null default now()
 );
 create index if not exists jobs_org on jobs (org_id, created_at desc);
+alter table jobs add column if not exists lease_until timestamptz;
 create table if not exists audit (
   id bigserial primary key,
   org_id text,

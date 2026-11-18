@@ -19,7 +19,6 @@ async function enqueue(org, type, params, by) {
   if (open.rows[0]) return open.rows[0].id;
   const jid = id('j_');
   await q('insert into jobs (id, org_id, type, params, created_by) values ($1,$2,$3,$4,$5)', [jid, org, type, params || {}, by || null]);
-  setImmediate(tick);
   return jid;
 }
 const progress = (jid, p) => q('update jobs set progress = $2, updated_at = now() where id = $1', [jid, p]);
@@ -85,9 +84,11 @@ const RUN = {
     let ws = await store.snapshot(org);
     const cats = catsOf(ws);
     if (!cats.length) throw new Error('No hay categorías activas.');
-    await RUN.map({ ...job, params: {} });
-    let batches = 0, total = 0, low = 0, none = 0;
+    await RUN.map({ ...job, id: job.id, params: {} });
+    const prev = job.progress || {};
+    let batches = prev.batches || 0, total = prev.done || 0, low = prev.low || 0, none = prev.none || 0;
     for (;;) {
+      if (job.deadline && Date.now() > job.deadline - 110000) { await progress(job.id, { done: total, batches, low, none }); return { partial: true }; }
       ws = await store.snapshot(org);
       const active = activeStores(ws), lm = I.labelMap(ws), cm = I.classMap(ws), items = I.allItems(ws);
       const queue = Object.values(items).filter((it) => active.includes(it.sid) && !cm[it.pid] && lm[it.sid + '|' + it.label] != null);
@@ -110,47 +111,55 @@ const RUN = {
   async refresh(job) {
     const org = job.org_id;
     const ws = await store.snapshot(org);
-    const out = { stores: 0, errors: [] };
-    for (const sid of activeStores(ws)) {
-      if (!(ws.stores[sid] || {}).url) continue;
-      try { await RUN.ingest({ ...job, params: { sid } }); out.stores++; }
-      catch (e) { out.errors.push(sid + ': ' + e.message); const s = await store.get(org, 'stores', sid); if (s) await store.put(org, 'stores', sid, { ...s, lastError: e.message, lastAttempt: new Date().toISOString() }, 'sistema'); }
-      await progress(job.id, out);
-    }
-    if (catsOf(await store.snapshot(org)).length) out.classify = await RUN.classify({ ...job, params: {} });
-    return out;
+    let n = 0;
+    for (const sid of activeStores(ws)) { if ((ws.stores[sid] || {}).url) { await enqueue(org, 'ingest', { sid }, 'sistema'); n++; } }
+    if (catsOf(ws).length) await enqueue(org, 'classify', {}, 'sistema');
+    return { stores: n, queued: true };
   },
 };
 
-let running = 0;
-async function tick() {
-  if (running >= CONCURRENCY) return;
-  const r = await q(`update jobs set status = 'running', updated_at = now() where id = (
-      select id from jobs j where status = 'queued' and not exists (select 1 from jobs k where k.org_id = j.org_id and k.status = 'running')
-      order by created_at limit 1 for update skip locked) returning *`).catch(() => ({ rows: [] }));
-  const job = r.rows[0];
-  if (!job) return;
-  running++;
-  (async () => {
-    try {
-      const result = await RUN[job.type](job);
-      await q("update jobs set status = 'done', progress = progress || $2, updated_at = now() where id = $1", [job.id, { result }]);
-    } catch (e) {
-      await q("update jobs set status = 'failed', error = $2, updated_at = now() where id = $1", [job.id, String((e && (e.message || e.code)) || e).slice(0, 500)]);
-      if (job.type === 'ingest' && job.params.sid) { const s = await store.get(job.org_id, 'stores', job.params.sid).catch(() => null); if (s) await store.put(job.org_id, 'stores', job.params.sid, { ...s, lastError: e.message, lastAttempt: new Date().toISOString() }, 'sistema').catch(() => {}); }
-    } finally { running--; setImmediate(tick); }
-  })();
-  setImmediate(tick);
+// Ejecución por pasos con candado: sirve igual en un servidor encendido y en funciones serverless.
+const BUDGET = Number(process.env.JOB_BUDGET_MS || (process.env.VERCEL ? 240000 : 3600000));
+async function claim(org) {
+  const r = await q(`update jobs set status = 'running', lease_until = now() + ($2 || ' milliseconds')::interval, updated_at = now() where id = (
+      select id from jobs j where (status = 'queued' or (status = 'running' and lease_until < now()))
+        and ($1::text is null or org_id = $1)
+        and not exists (select 1 from jobs k where k.org_id = j.org_id and k.id <> j.id and k.status = 'running' and k.lease_until >= now())
+      order by created_at limit 1 for update skip locked) returning *`, [org || null, String(BUDGET + 60000)]);
+  return r.rows[0];
+}
+async function step(org) {
+  const job = await claim(org);
+  if (!job) return null;
+  job.deadline = Date.now() + BUDGET;
+  try {
+    const result = await RUN[job.type](job);
+    if (result && result.partial) await q("update jobs set status = 'queued', lease_until = null, updated_at = now() where id = $1", [job.id]);
+    else await q("update jobs set status = 'done', lease_until = null, progress = progress || $2, updated_at = now() where id = $1", [job.id, { result }]);
+  } catch (e) {
+    await q("update jobs set status = 'failed', lease_until = null, error = $2, updated_at = now() where id = $1", [job.id, String((e && (e.message || e.code)) || e).slice(0, 500)]);
+    if (job.type === 'ingest' && job.params.sid) { const s = await store.get(job.org_id, 'stores', job.params.sid).catch(() => null); if (s) await store.put(job.org_id, 'stores', job.params.sid, { ...s, lastError: e.message, lastAttempt: new Date().toISOString() }, 'sistema').catch(() => {}); }
+  }
+  return job.id;
+}
+// Pasos seguidos hasta agotar el tiempo disponible (cron de Vercel o llamada de la consola)
+async function drain(org, ms) {
+  const until = Date.now() + ms; let n = 0;
+  while (Date.now() < until - 5000) { const id = await step(org); if (!id) break; n++; }
+  return n;
+}
+async function enqueueRefreshAll() {
+  const r = await q('select id from orgs where published');
+  for (const o of r.rows) await enqueue(o.id, 'refresh', {}, 'sistema');
+  return r.rows.length;
 }
 
+let busy = 0;
 function start() {
-  q("update jobs set status = 'queued' where status = 'running'").catch(() => {});
-  setInterval(tick, 3000);
+  const CONC = Number(process.env.JOB_CONCURRENCY || 2);
+  setInterval(() => { if (busy >= CONC) return; busy++; step(null).catch(() => {}).finally(() => { busy--; }); }, 3000);
   const when = process.env.REFRESH_CRON || '17 5 * * *';
-  if (when !== 'off') cron.schedule(when, async () => {
-    const r = await q('select id from orgs where published');
-    for (const o of r.rows) await enqueue(o.id, 'refresh', {}, 'sistema');
-  }, { timezone: process.env.TZ || 'America/Bogota' });
+  if (when !== 'off') cron.schedule(when, () => enqueueRefreshAll().catch(() => {}), { timezone: process.env.TZ || 'America/Bogota' });
 }
 
-module.exports = { enqueue, start, RUN };
+module.exports = { enqueue, start, step, drain, enqueueRefreshAll, RUN };
