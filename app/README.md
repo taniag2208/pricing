@@ -28,12 +28,13 @@ Necesitas: un PostgreSQL, una API key de Anthropic y un dominio con HTTPS.
 
 **Opción A — Render (la más rápida):** en Render, *New > Blueprint*, conecta este repositorio; `render.yaml` crea el servicio web (Docker, plan Starter, siempre encendido para el cron) y la base de datos. Completa `ANTHROPIC_API_KEY`, `ADMIN_EMAIL` y `ADMIN_PASSWORD` cuando lo pida. `SESSION_SECRET` se genera solo.
 
-**Opción B — Servidor propio (AWS, GCP, Azure, DigitalOcean):**
-```bash
-cp .env.example .env    # completa los valores
-docker compose up -d --build
-```
-Pon un proxy con HTTPS delante del puerto 3000 (Caddy, Nginx, el balanceador de tu nube).
+**Opción B — Servidor propio de Tita (recomendada si Tita aloja):**
+1. Un servidor Ubuntu 22.04 o 24.04 con 2 vCPU, 4 GB de RAM y 40 GB de disco (AWS, GCP, Azure, DigitalOcean o un servidor físico), con los puertos 80 y 443 abiertos a internet.
+2. Un registro DNS tipo A del dominio (ej. `pricing.titamedia.com`) apuntando a la IP del servidor.
+3. Copia la carpeta `app/` al servidor y ejecuta `sudo ./instalar.sh`. Pide el dominio, el correo y una contraseña temporal del primer administrador, y la API key de Anthropic; genera el resto de secretos y levanta la base de datos, la aplicación, el HTTPS automático (Caddy con Let's Encrypt) y una copia diaria de la base de datos en `respaldos/` (14 días).
+4. Actualizar a una versión nueva: reemplaza la carpeta (sin borrar `.env` ni `respaldos/`) y ejecuta `docker compose up -d --build`.
+
+Lleva los respaldos también fuera del servidor (por ejemplo, sincroniza `respaldos/` con un bucket de almacenamiento).
 
 **Primer ingreso:** entra con `ADMIN_EMAIL` / `ADMIN_PASSWORD`; el sistema pide cambiar la contraseña. Desde la consola agregas al resto del equipo de Tita.
 
