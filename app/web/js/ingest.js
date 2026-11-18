@@ -169,17 +169,56 @@
 
   /* ---------- IA (capability sample) ---------- */
   const errText = (e) => ({
-    not_granted: 'No diste permiso para usar Claude en esta página. Puedes activarlo desde el menú de permisos del artifact.',
-    sampling_disabled: 'Claude no está disponible para esta cuenta u organización.',
+    not_granted: 'Tu rol no permite usar esta función de Claude.',
+    forbidden: 'Tu rol no permite usar esta función de Claude.',
+    sampling_disabled: 'La integración con Claude no está configurada en el servidor. Avísale al equipo de Tita.',
     rate_limited: 'Se alcanzó el límite de uso de Claude por ahora. Espera un momento e intenta de nuevo.',
     invalid_json: 'La respuesta de Claude no llegó en el formato esperado. Intenta de nuevo; si se repite, usa un lote más pequeño.',
     prompt_too_large: 'Demasiado texto para una sola consulta. Usa un lote más pequeño o pega menos texto.',
     refused: 'Claude no procesó este contenido. Revisa el texto pegado.',
     cancelled: 'Cancelado.',
-    session_expired: 'Tu sesión expiró. Vuelve a iniciar sesión en claude.ai.',
-  }[e && e.code] || 'No se pudo completar la consulta a Claude (' + ((e && (e.code || e.message)) || 'error') + '). Intenta de nuevo.');
+    session_expired: 'Tu sesión expiró. Vuelve a iniciar sesión.',
+  }[e && e.code] || (e && e.message) || 'No se pudo completar la consulta a Claude. Intenta de nuevo.');
   I.errText = errText;
-  I.sample = async function () { try { return await claude.use('sample'); } catch (e) { return null; } };
+  // Claude se llama a través del servidor (la API key nunca llega al navegador).
+  const toB64 = (blob) => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(blob); });
+  I.sample = async function () {
+    const L = TP.live;
+    if (!L || !L.org) return null;
+    const json = async (prompt, opts = {}) => {
+      const imgs = opts.images ? (Array.isArray(opts.images) ? opts.images : [opts.images]) : [];
+      const images = await Promise.all(imgs.map(async (b) => ({ media_type: b.type || 'image/jpeg', data: await toB64(b) })));
+      if (opts.signal && opts.signal.aborted) throw { code: 'cancelled' };
+      const r = await L.api('POST', '/orgs/' + L.org + '/ai/json', { prompt, tier: opts.modelTier, kind: opts.kind, images });
+      return r.data;
+    };
+    // Bucle de herramientas para el copiloto: el servidor llama a Claude; las herramientas corren aquí.
+    const chat = async (input, opts = {}) => {
+      const turns = (typeof input === 'string' ? [{ role: 'user', content: input }] : input).reduce((acc, m) => { const last = acc[acc.length - 1]; if (last && last.role === m.role) last.content += '\n\n' + m.content; else acc.push({ role: m.role, content: m.content }); return acc; }, []);
+      const tools = (opts.tools || []).map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema || { type: 'object', properties: {} } }));
+      let text = '';
+      for (let round = 0; round < 6; round++) {
+        if (opts.signal && opts.signal.aborted) throw { code: 'cancelled', text };
+        const r = await L.api('POST', '/orgs/' + L.org + '/ai/chat', { messages: turns, tools });
+        const t = r.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+        if (t) { text = text ? text + '\n\n' + t : t; opts.onText && opts.onText({ text, delta: t }); }
+        turns.push({ role: 'assistant', content: r.content });
+        const uses = r.content.filter((b) => b.type === 'tool_use');
+        if (r.stop_reason !== 'tool_use' || !uses.length) break;
+        const results = await Promise.all(uses.map(async (u) => {
+          const tool = (opts.tools || []).find((x) => x.name === u.name);
+          try { const out = tool ? await tool.execute(u.input || {}, { signal: opts.signal }) : 'Herramienta desconocida'; return { type: 'tool_result', tool_use_id: u.id, content: typeof out === 'string' ? out : JSON.stringify(out).slice(0, 30000) }; }
+          catch (e) { return { type: 'tool_result', tool_use_id: u.id, content: 'Error: ' + (e.message || e), is_error: true }; }
+        }));
+        turns.push({ role: 'user', content: results });
+      }
+      if (!text) throw { code: 'empty_completion' };
+      return { text, truncated: false };
+    };
+    chat.json = json;
+    chat.limits = async () => ({ maxPromptBytes: 250000, tools: { maxCount: 12 }, images: { maxCount: 3, maxInputBytes: 8e6, mediaTypes: ['image/png', 'image/jpeg', 'image/webp'] } });
+    return chat;
+  };
 
   I.extractFromText = async function (sample, text, origin, signal) {
     const body = text.replace(/\s+/g, ' ').slice(0, 60000);
@@ -188,7 +227,7 @@
       'Ignora menús, filtros, banners y textos legales. No inventes datos: si un campo no aparece, usa null. ' +
       'Responde solo con un arreglo JSON de objetos {"name": string, "price": number (precio de venta actual), "listPrice": number|null (precio tachado o antes del descuento), "category": string|null, "url": string|null}. ' +
       'Los precios como número sin símbolos ni separadores de miles.\n\nTEXTO DE LA PÁGINA (' + (origin || 'tienda') + '):\n' + body,
-      { modelTier: 'quick', signal });
+      { modelTier: 'quick', signal, kind: 'extract' });
     if (!Array.isArray(out)) throw { code: 'invalid_json' };
     return out.map((p, i) => { const pp = pricePair(p.price, p.listPrice); if (!p.name || !pp) return null; return mk({ id: 't:' + I.slug(p.name) + '-' + i, name: p.name, label: p.category, ...pp, url: p.url && /^https?:/.test(p.url) ? p.url : p.url && origin ? origin + (p.url.startsWith('/') ? '' : '/') + p.url : null }); }).filter(Boolean);
   };
@@ -208,7 +247,7 @@
       '4. No uses nombres de marcas en categorías ni niveles.\n\n' +
       'Responde solo JSON: {"categories":[{"name","short","synonyms":[],"typologies":[],"materials":[],"colors":[],"attributes":[{"name","levels":["","","","",""]}]}]}\n\n' +
       'CATÁLOGO PROPIO por etiqueta (cantidad: ejemplos):\n' + labelSummary(own, 40) + '\n\nEJEMPLOS DE FICHAS PROPIAS:\n' + ex + '\n\nETIQUETAS DE LA COMPETENCIA:\n' + labelSummary(comps, 40),
-      { signal });
+      { signal, kind: 'propose' });
     const cats = (out && out.categories) || [];
     if (!cats.length) throw { code: 'invalid_json' };
     return cats.map((c, i) => ({
@@ -227,7 +266,7 @@
       'CATEGORÍAS:\n' + cats.map((c) => `${c.id}: ${c.name} (tipos: ${c.typologies.join(', ')})`).join('\n') + '\n\nETIQUETAS:\n' +
       groups.map((g, i) => `${i}. ${g.store} · «${g.label}» (${g.n}): ${g.examples.join('; ')}`).join('\n') +
       '\n\nResponde solo JSON: un arreglo con un objeto por etiqueta, {"i": número, "cat": "id de categoría" | "mixed" | null}.',
-      { modelTier: 'quick', signal });
+      { modelTier: 'quick', signal, kind: 'map' });
     if (!Array.isArray(out)) throw { code: 'invalid_json' };
     const res = {};
     out.forEach((o) => { const g = groups[Number(o.i)]; if (g) res[g.key] = o.cat === 'mixed' ? 'mixed' : cats.some((c) => c.id === o.cat) ? o.cat : null; });
@@ -242,7 +281,7 @@
       'Reglas: usa solo la evidencia del nombre y la descripción; si un atributo no se puede inferir, pon null (no adivines). "conf" es "alta" si casi todo está explícito, "media" si inferiste varios niveles, "baja" si hay poca información. "ev" es una cita breve (máx. 12 palabras) del texto que más justifica la calificación.\n\n' +
       'CATEGORÍAS Y RÚBRICAS:\n' + catTxt + '\n\nPRODUCTOS:\n' + itTxt +
       '\n\nResponde solo un arreglo JSON, un objeto por producto en el mismo orden: {"k": n, "cat": "id"|null, "typ": string, "mat": string, "color": string, "lv": [n|null, …uno por atributo], "conf": "alta"|"media"|"baja", "ev": string}.',
-      { signal });
+      { signal, kind: 'classify' });
     if (!Array.isArray(out)) throw { code: 'invalid_json' };
     const res = {};
     out.forEach((o) => {
@@ -263,7 +302,7 @@
       'tipos: ' + cat.typologies.join(' | ') + '\nmateriales: ' + cat.materials.join(' | ') + '\ncolores: ' + cat.colors.join(' | ') + '\n' +
       cat.attrs.map((a, j) => `a${j} ${a.name}: ` + a.levels.map((l, k) => k + 1 + '=' + l).join('; ')).join('\n') +
       '\nResponde solo JSON: {"typ","mat","color","lv":[…],"ev": "qué ves que justifica los niveles (máx. 30 palabras)"}',
-      { images: image, signal });
+      { images: image, signal, kind: 'image' });
     return out || {};
   };
 

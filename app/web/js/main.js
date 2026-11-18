@@ -4,7 +4,7 @@
   'use strict';
   const { useState, useMemo, useEffect, useRef } = React;
   const TP = window.TP, UI = TP.ui, html = UI.html, A = TP.app, L = TP.live, I = TP.ingest;
-  const { Icon, Badge, Thumb, Empty, Note } = UI;
+  const { Icon, Badge, Thumb, Empty, Note, Select } = UI;
 
   /* =========================================================
      COPILOTO — respaldo por reglas (si Claude no está disponible)
@@ -142,7 +142,7 @@
     };
     if (!open) return null;
     return html`<aside className="copilot" aria-label="Copiloto de pricing">
-      <div className="cphead"><div><b><${Icon} n="spark" /> Copiloto de pricing</b><small>${mode === 'llm' ? 'Claude responde con los datos de este espacio. Cada pregunta usa tu cuota de Claude.' : mode === 'rules' ? 'Claude no está disponible en esta vista: respondo con reglas calculadas sobre tus datos.' : 'Conectando…'}</small></div><button type="button" className="iconbtn" aria-label="Cerrar copiloto" onClick=${() => setOpen(false)}><${Icon} n="x" /></button></div>
+      <div className="cphead"><div><b><${Icon} n="spark" /> Copiloto de pricing</b><small>${mode === 'llm' ? 'Claude responde con los datos de tu cuenta y te lleva a la vista que lo respalda.' : mode === 'rules' ? 'Claude no está disponible en este momento: respondo con reglas calculadas sobre tus datos.' : 'Conectando…'}</small></div><button type="button" className="iconbtn" aria-label="Cerrar copiloto" onClick=${() => setOpen(false)}><${Icon} n="x" /></button></div>
       <div className="cpbody">
         ${!msgs.length ? html`<p className="muted">Pregunta sobre tus precios, categorías o competidores. Te llevo a la vista que respalda cada respuesta.</p>` : null}
         ${msgs.map((m, i) => (m.who === 'u' ? html`<div key=${i} className="msg u">${m.text}</div>` : m.raw != null ? html`<div key=${i} className="msg a">${m.raw ? md(m.raw) : html`<span className="muted">Pensando…</span>`}${m.basis ? html`<small className="basis">${m.basis}</small>` : null}</div>` : html`<div key=${i} className="msg a">${m.text}${m.action ? html`<button type="button" className="btn sm" onClick=${() => { m.action.fn(); if (innerWidth < 900) setOpen(false); }}>${m.action.l}<${Icon} n="arrow" /></button>` : null}${m.basis ? html`<small className="basis">${m.conf ? html`<b>Confianza: ${m.conf.toLowerCase()}.</b> ` : null}${m.basis}</small>` : null}</div>`))}
@@ -156,24 +156,41 @@
   /* =========================================================
      SHELL
      ========================================================= */
-  const NAV = [
-    ['Inteligencia', [['overview', 'Overview', 'overview'], ['market', 'Market Intelligence', 'market'], ['advisor', 'Price Advisor', 'advisor']]],
-    ['Decisiones', [['launch', 'Product Launch', 'launch'], ['promo', 'Promotion Optimizer', 'promo']]],
-    ['Validación y aprendizaje', [['pulse', 'Pulse WTP', 'pulse'], ['learning', 'Revenue Learning', 'learning']]],
-    ['Datos', [['data', 'Catálogo y clasificación', 'store']]],
-  ];
-  const ROUTES = ['overview', 'market', 'advisor', 'launch', 'promo', 'pulse', 'learning', 'data', 'config'];
-  const hashRoute = () => { const h = (location.hash || '').slice(1); return ROUTES.includes(h) ? h : 'overview'; };
+  const ROUTES = ['overview', 'market', 'advisor', 'launch', 'promo', 'pulse', 'learning', 'privados', 'data', 'config', 'usuarios'];
+  const hashRoute = () => { const h = (location.hash || '').slice(1).split('/').pop(); return ROUTES.includes(h) ? h : 'overview'; };
 
   function Toasts() {
     const [list, setList] = useState([]);
     useEffect(() => { L.toast = (text, tone) => { const id = Date.now() + Math.random(); setList((l) => [...l.slice(-2), { id, text, tone }]); setTimeout(() => setList((l) => l.filter((x) => x.id !== id)), 6000); }; return () => { L.toast = () => {}; }; }, []);
     return html`<div className="toasts" aria-live="polite">${list.map((t) => html`<div key=${t.id} className=${'toast t-' + (t.tone || 'info')}>${t.text}</div>`)}</div>`;
   }
+  const Center = ({ children }) => html`<div className="ob"><div className="ob-in narrowbox">${children}</div></div>`;
+  const ROLE = { tita_admin: 'Administrador Tita', client_admin: 'Administrador del cliente', analyst: 'Analista', viewer: 'Lectura' };
 
-  function App() {
-    const ws = L.useWorkspace();
-    const [P, setP] = useState({ write: null, edit: false });
+  /* ---------- usuarios de una cuenta (Tita) ---------- */
+  function UsersAdmin({ org }) {
+    const [list, setList] = useState(null);
+    const [f, setF] = useState({ name: '', email: '', role: 'client_admin' });
+    const [msg, setMsg] = useState(null);
+    const load = () => L.api('GET', '/admin/orgs/' + org + '/users').then(setList).catch((e) => L.toast(e.message, 'bad'));
+    useEffect(() => { load(); }, [org]);
+    const add = async (e) => { e.preventDefault(); try { const r = await L.api('POST', '/admin/orgs/' + org + '/users', f); setMsg({ email: f.email, pw: r.tempPassword }); setF({ name: '', email: '', role: f.role }); L.resetPeople(); load(); } catch (x) { L.toast(x.message, 'bad'); } };
+    const reset = async (u) => { try { const r = await L.api('PATCH', '/admin/users/' + u.id, { resetPassword: true }); setMsg({ email: u.email, pw: r.tempPassword }); load(); } catch (x) { L.toast(x.message, 'bad'); } };
+    const role = async (u, r) => { await L.api('PATCH', '/admin/users/' + u.id, { role: r }).catch((x) => L.toast(x.message, 'bad')); load(); };
+    const [del, setDel] = useState(null);
+    const remove = async (u) => { await L.api('DELETE', '/admin/users/' + u.id).catch((x) => L.toast(x.message, 'bad')); setDel(null); load(); };
+    return html`<div className="page"><header className="ph"><div><div className="eyebrow">Usuarios de la cuenta</div><h1>¿Quién del cliente puede entrar?</h1><p>Crea los accesos del cliente. Cada persona recibe una contraseña temporal y debe cambiarla al entrar.</p></div></header>
+      ${msg ? html`<${Note}>Contraseña temporal de <b>${msg.email}</b>: <span className="mono sel">${msg.pw}</span>. Cópiala y envíala por un canal seguro; no se vuelve a mostrar.<//>` : null}
+      <form className="panel" onSubmit=${add}><h2>Nuevo usuario</h2><div className="grid-3f"><label className="fld" htmlFor="nu-n"><span>Nombre</span><input id="nu-n" value=${f.name} onInput=${(e) => setF({ ...f, name: e.target.value })} /></label><label className="fld" htmlFor="nu-e"><span>Correo</span><input id="nu-e" type="email" value=${f.email} onInput=${(e) => setF({ ...f, email: e.target.value })} /></label><${Select} id="nu-r" label="Rol" value=${f.role} onChange=${(v) => setF({ ...f, role: v })} options=${[{ v: 'client_admin', l: 'Administrador del cliente (aprueba, carga costos)' }, { v: 'analyst', l: 'Analista (propone cambios y estudios)' }, { v: 'viewer', l: 'Lectura (solo ve el análisis)' }]} /></div><div><button className="btn primary sm" type="submit">Crear acceso</button></div></form>
+      <section className="panel">${!list ? html`<span className="spin"></span>` : list.length ? html`<div className="tw"><table className="tbl"><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Último ingreso</th><th></th></tr></thead><tbody>${list.map((u) => html`<tr key=${u.id}><td><b>${u.name}</b>${u.must_change ? html`<small>pendiente de cambiar contraseña</small>` : null}</td><td>${u.email}</td><td><select aria-label="Rol" value=${u.role} onChange=${(e) => role(u, e.target.value)}><option value="client_admin">Administrador del cliente</option><option value="analyst">Analista</option><option value="viewer">Lectura</option></select></td><td>${u.last_login ? new Date(u.last_login).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</td><td><div className="mapact"><button type="button" className="btn sm" onClick=${() => reset(u)}>Nueva contraseña</button>${del === u.id ? html`<button type="button" className="btn sm danger" onClick=${() => remove(u)}>Confirmar</button>` : html`<button type="button" className="btn sm ghost" onClick=${() => setDel(u.id)}>Quitar</button>`}</div></td></tr>`)}</tbody></table></div>` : html`<${Empty} title="Sin usuarios todavía">Crea al menos un administrador del cliente antes de publicar la cuenta.<//>`}</section></div>`;
+  }
+
+  /* ---------- espacio de una cuenta (Tita o cliente) ---------- */
+  function Workspace({ me, orgId, orgInfo, onBack, refreshOrg }) {
+    const P = L.perms(me.user.role);
+    L.org = orgId;
+    const ws = L.useWorkspace(orgId, { fast: P.tita });
+    const jobs = L.useJobs(orgId, P.tita);
     const [route, setRoute] = useState(hashRoute);
     const [fRaw, setFRaw] = useState({ cat: null, off: [], priceType: 'list', mat: 'all', typ: 'all', pos: null });
     const [subs, setSubs] = useState({ market: 'valor', advisor: 'diagnostico', config: 'competidores', data: 'tiendas' });
@@ -183,26 +200,32 @@
     const [cpOpen, setCpOpen] = useState(false);
     const [msgs, setMsgs] = useState([]);
     const [navOpen, setNavOpen] = useState(false);
+    const [pubAsk, setPubAsk] = useState(false);
     useEffect(() => { const on = () => setRoute(hashRoute()); addEventListener('hashchange', on); return () => removeEventListener('hashchange', on); }, []);
-    useEffect(() => { if (ws.status !== 'ready' && ws.status !== 'slow') return; (async () => { const w = await L.canWrite(); const e = await L.canEdit(); setP({ write: w !== false, edit: e }); })(); }, [ws.status]);
+    useEffect(() => { L.resetPeople(); }, [orgId]);
     const cfg = useMemo(() => ({ ...A.defaultConfig(), ...(ws.ws.config || {}) }), [ws.ws.config]);
     const dec = useMemo(() => ({ map: {}, comp: {}, ...(ws.ws.dec || {}) }), [ws.ws.dec]);
-    const D = useMemo(() => (cfg.setupDone ? I.buildDataset(ws) : null), [cfg.setupDone, ws.stores, ws.catalog, ws.cats, ws.cls, ws.fixes, ws.labelmap, ws.priv, cfg.market]);
-    const E = useMemo(() => (D ? A.compute(D, cfg, dec) : null), [D, cfg, dec]);
+    const ready = ws.status === 'ready';
+    const D = useMemo(() => (ready && Object.keys(ws.cats).length ? I.buildDataset(ws) : null), [ready, ws.stores, ws.catalog, ws.cats, ws.cls, ws.fixes, ws.labelmap, ws.priv, cfg.market]);
+    const E = useMemo(() => { if (!D) return null; const e = A.compute(D, cfg, dec); e.P = P; e.ws = ws; return e; }, [D, cfg, dec, ws.history]);
     const approvals = useMemo(() => Object.values(ws.approvals).sort((a, b) => (b.at || '').localeCompare(a.at || '')), [ws.approvals]);
     const studies = useMemo(() => Object.values(ws.studies).sort((a, b) => (b.at || '').localeCompare(a.at || '')), [ws.studies]);
 
-    if (ws.status === 'loading') return html`<div className="ob"><div className="ob-in"><div className="mapact"><span className="spin"></span><span>Cargando el espacio de trabajo…</span></div></div></div>`;
-    if (ws.status === 'nodb' || ws.status === 'revoked' || ws.status === 'error') return html`<div className="ob"><div className="ob-in"><h2>No se puede abrir el espacio de trabajo</h2><p className="muted">${ws.status === 'nodb' ? 'Esta vista no tiene acceso a la base de datos del espacio. Abre la página dentro de claude.ai con tu cuenta.' : ws.status === 'revoked' ? 'Se retiró tu acceso.' : 'La base de datos respondió con un error (' + (ws.error || '') + '). Recarga la página.'}</p></div></div>`;
-    const slowNote = ws.status === 'slow' ? html`<div className="confirm">No se pudo confirmar la conexión con la base de datos; lo que ves puede estar desactualizado.</div>` : null;
-    const ro = P.write === false;
-    if (!cfg.setupDone) return html`<div>${slowNote}<${A.Setup} ws=${ws} ro=${ro} /><${Toasts} /></div>`;
+    if (ws.status === 'loading') return html`<${Center}><div className="mapact"><span className="spin"></span><span>Cargando la cuenta…</span></div><//>`;
+    if (ws.status === 'error') return html`<${Center}><h2>No se pudo cargar la cuenta</h2><p className="muted">${ws.error}</p><button className="btn primary" type="button" onClick=${() => location.reload()}>Reintentar</button><//>`;
+    if (ws.status === 'unpublished' || (!P.tita && !cfg.setupDone)) return html`<${Center}><div className="brandmark"><span className="logo">T</span>TITA Pricing Intelligence <b>360°</b></div><h2>Estamos preparando tu cuenta</h2><p className="muted">El equipo de Tita está importando los catálogos, definiendo las categorías y revisando la clasificación. Te avisaremos cuando el análisis esté listo.</p><button className="btn ghost" type="button" onClick=${() => L.api('POST', '/logout').then(() => location.reload())}>Cerrar sesión</button><//>`;
+    const adminBar = P.tita ? html`<div className="adminbar"><button type="button" className="btn sm ghost" onClick=${onBack}><${Icon} n="arrow" cls="flip" />Cuentas</button><b>${orgInfo.name}</b><${Badge} tone=${orgInfo.published ? 'ok' : 'warn'}>${orgInfo.published ? 'Publicada: el cliente la ve' : 'Sin publicar: el cliente no la ve'}<//>
+      ${pubAsk ? html`<span className="sm">${orgInfo.published ? '¿Ocultar la cuenta al cliente?' : '¿Publicar? El cliente verá todo el análisis.'}</span><button type="button" className="btn sm primary" onClick=${async () => { await L.api('PATCH', '/admin/orgs/' + orgId, { published: !orgInfo.published }); if (!orgInfo.published && !cfg.setupDone) await A.saveConfig(ws, { setupDone: true }); setPubAsk(false); refreshOrg(); }}>Confirmar</button><button type="button" className="btn sm ghost" onClick=${() => setPubAsk(false)}>Cancelar</button>` : html`<button type="button" className="btn sm" onClick=${() => setPubAsk(true)}>${orgInfo.published ? 'Despublicar' : 'Publicar para el cliente'}</button>`}
+      <button type="button" className="btn sm" disabled=${!Object.keys(ws.stores).length} onClick=${() => L.runJob('refresh')}>Actualizar todo ahora</button></div>` : null;
+    if (P.tita && !cfg.setupDone) return html`<div>${adminBar}<${A.Setup} ws=${ws} ro=${false} jobs=${jobs} orgName=${orgInfo.name} /><${Toasts} /></div>`;
+    if (!E || !D) return html`<div>${adminBar}<${Center}><h2>Sin categorías todavía</h2><p className="muted">${P.tita ? 'Define las categorías en Catálogo y clasificación.' : 'La cuenta aún no tiene categorías.'}</p>${P.tita ? html`<button className="btn primary" type="button" onClick=${() => A.saveConfig(ws, { setupDone: false, step: 3 })}>Ir a categorías</button>` : null}<//><${Toasts} /></div>`;
 
     const cat = E.cats.some((c) => c.id === fRaw.cat) ? fRaw.cat : E.cats[0] && E.cats[0].id;
     const f = { ...fRaw, cat, brands: E.cfg.comps.filter((b) => !fRaw.off.includes(b)) };
     const setF = (n) => setFRaw({ ...n, off: E.cfg.comps.filter((b) => !n.brands.includes(b)), brands: undefined });
+    const allowed = (r) => (['data', 'config', 'usuarios'].includes(r) ? P.tita : r === 'privados' ? P.priv && !P.tita : true);
     const go = (r, o = {}) => {
-      if (!ROUTES.includes(r)) r = 'overview';
+      if (!ROUTES.includes(r) || !allowed(r)) r = 'overview';
       const n = { ...fRaw };
       if (o.cat && E.cats.some((c) => c.id === o.cat)) { n.cat = o.cat; n.mat = 'all'; n.typ = 'all'; }
       if (o.priceType) n.priceType = o.priceType;
@@ -215,18 +238,18 @@
       setRoute(r);
       try { document.querySelector('.main').scrollTo(0, 0); } catch (e) { /* sin scroll */ }
     };
+    const rt = allowed(route) ? route : 'overview';
     const openProduct = (catId, pid) => { setFocus(pid); go('advisor', { cat: catId, sub: 'diagnostico' }); };
     const actions = { go, openProduct };
-    const setSub = (k) => setSubs((s) => ({ ...s, [route]: k }));
-    const setDec = (n) => L.set('ws/dec', { map: n.map || {}, comp: n.comp || {} });
+    const setSub = (k) => setSubs((s) => ({ ...s, [rt]: k }));
+    const setDec = (n) => (P.config ? L.set('ws/dec', { map: n.map || {}, comp: n.comp || {} }) : Promise.resolve());
     const setCfg = (n) => A.saveConfig(ws, n);
-    const common = { E, ws, D, f, setF, dec, setDec, setCfg, go, openProduct, focus, setFocus, approvals, studies, sub: subs[route], setSub, P, ro };
+    const common = { E, ws, D, f, setF, dec, setDec, setCfg, go, openProduct, focus, setFocus, approvals, studies, sub: subs[rt], setSub, P, ro: !P.write, jobs };
     const pend = approvals.filter((a) => a.status === 'pendiente').length;
-    const needCats = !E.cats.length && ['market', 'advisor', 'launch', 'promo'].includes(route);
-
+    const needCats = !E.cats.length && ['market', 'advisor', 'launch', 'promo'].includes(rt);
     let view;
-    if (needCats) view = html`<div className="page"><${Empty} icon="store" title="Todavía no hay productos tuyos clasificados en tus categorías" action=${html`<button type="button" className="btn primary" onClick=${() => go('data', { sub: 'clasificacion' })}>Ir a clasificación</button>`}>El análisis empieza cuando Claude clasifica al menos algunos productos de tu tienda y de la competencia.<//></div>`;
-    else switch (route) {
+    if (needCats) view = html`<div className="page"><${Empty} icon="store" title="Todavía no hay productos clasificados en las categorías" action=${P.tita ? html`<button type="button" className="btn primary" onClick=${() => go('data', { sub: 'clasificacion' })}>Ir a clasificación</button>` : null}>El análisis empieza cuando haya productos de la tienda y de la competencia clasificados.<//></div>`;
+    else switch (rt) {
       case 'market': view = html`<${A.Market} ...${common} addStudyRec=${(r) => setExtraRecs((x) => [r, ...x].slice(0, 3))} />`; break;
       case 'advisor': view = html`<${A.Advisor} ...${common} />`; break;
       case 'launch': view = html`<${A.Launch} key=${prefill ? prefill.t : 'l'} ...${common} prefill=${prefill} />`; break;
@@ -235,23 +258,31 @@
       case 'learning': view = html`<${A.Learning} ...${common} />`; break;
       case 'data': view = html`<${A.DataModule} ...${common} />`; break;
       case 'config': view = html`<${A.Config} ...${common} />`; break;
+      case 'usuarios': view = html`<${UsersAdmin} org=${orgId} />`; break;
+      case 'privados': view = html`<div className="page"><header className="ph"><div><div className="eyebrow">Datos privados</div><h1>Costos y ventas</h1><p>Solo los ven los administradores de tu cuenta y el equipo de Tita.</p></div></header><${A.PrivateImport} ws=${ws} ro=${!P.priv} /></div>`; break;
       default: view = html`<${A.Overview} ...${common} />`;
     }
-    const navItem = ([k, l, ic]) => html`<a key=${k} href=${'#' + k} className=${route === k ? 'on' : ''} aria-current=${route === k ? 'page' : undefined} onClick=${(e) => { e.preventDefault(); go(k); }}><${Icon} n=${ic} />${l}${k === 'market' && E.pendingMaps ? html`<span className="cnt">${E.pendingMaps}</span>` : null}${k === 'advisor' && pend ? html`<span className="cnt">${pend}</span>` : null}${k === 'data' && D.pending ? html`<span className="cnt" title="Productos sin clasificar">${D.pending > 999 ? '999+' : D.pending}</span>` : null}</a>`;
+    const NAV = [
+      ['Inteligencia', [['overview', 'Overview', 'overview'], ['market', 'Market Intelligence', 'market'], ['advisor', 'Price Advisor', 'advisor']]],
+      ['Decisiones', [['launch', 'Product Launch', 'launch'], ['promo', 'Promotion Optimizer', 'promo']]],
+      ['Validación y aprendizaje', [['pulse', 'Pulse WTP', 'pulse'], ['learning', 'Revenue Learning', 'learning']]],
+      ...(P.tita ? [['Administración Tita', [['data', 'Catálogo y clasificación', 'store'], ['config', 'Configuración', 'config'], ['usuarios', 'Usuarios', 'lock']]]] : P.priv ? [['Datos', [['privados', 'Costos y ventas', 'upload']]]] : []),
+    ];
+    const navItem = ([k, l, ic]) => html`<a key=${k} href=${'#' + k} className=${rt === k ? 'on' : ''} aria-current=${rt === k ? 'page' : undefined} onClick=${(e) => { e.preventDefault(); go(k); }}><${Icon} n=${ic} />${l}${k === 'market' && E.pendingMaps && P.tita ? html`<span className="cnt">${E.pendingMaps}</span>` : null}${k === 'advisor' && pend ? html`<span className="cnt">${pend}</span>` : null}${k === 'data' && D.pending ? html`<span className="cnt" title="Productos sin clasificar">${D.pending > 999 ? '999+' : D.pending}</span>` : null}</a>`;
     return html`<div className=${'shell ' + (cpOpen ? 'cp-on' : '')}>
       <aside className=${'side ' + (navOpen ? 'open' : '')}>
         <div className="brandmark"><span className="logo">T</span><div><b>TITA Pricing</b><small>Intelligence 360°</small></div></div>
         <nav aria-label="Módulos">${NAV.map(([g, items]) => html`<div key=${g} className="ng"><span>${g}</span>${items.map(navItem)}</div>`)}</nav>
-        <div className="sidefoot">${navItem(['config', 'Configuration', 'config'])}<div className="tenant"><span className="muted">Espacio de trabajo</span><b>${D.brandById.own.name}</b><small>${Object.keys(ws.stores).length - 1} competidores · ${TP.MARKETS[cfg.market].name}</small></div></div>
+        <div className="sidefoot"><div className="tenant"><span className="muted">Cuenta</span><b>${orgInfo.name}</b><small>${me.user.name} · ${ROLE[me.user.role]}</small><button type="button" className="linkbtn side-link" onClick=${() => L.api('POST', '/logout').then(() => location.reload())}>Cerrar sesión</button></div></div>
       </aside>
       ${navOpen ? html`<div className="scrim" onClick=${() => setNavOpen(false)}></div>` : null}
       <div className="main">
+        ${adminBar}
         <header className="top">
           <button type="button" className="iconbtn menu" aria-label="Abrir menú" onClick=${() => setNavOpen(true)}><${Icon} n="menu" /></button>
-          <div className="topctx"><b>${D.brandById.own.name}</b><span className="muted">${(ws.stores.own && ws.stores.own.url) ? I.hostOf(ws.stores.own.url) : ''}</span><span className="pill">${E.mk.currency}</span><span className="pill">${D.products.filter((p) => p.cat).length} productos clasificados</span>${ro ? html`<span className="pill demo">Solo lectura</span>` : null}</div>
-          <button type="button" className=${'btn sm cpbtn ' + (cpOpen ? 'primary' : '')} onClick=${() => setCpOpen(!cpOpen)} aria-expanded=${cpOpen}><${Icon} n="spark" />Copiloto</button>
+          <div className="topctx"><b>${D.brandById.own.name}</b><span className="muted">${(ws.stores.own && ws.stores.own.url) ? I.hostOf(ws.stores.own.url) : ''}</span><span className="pill">${E.mk.currency}</span><span className="pill">${D.products.filter((p) => p.cat).length} productos clasificados</span>${(ws.stores.own || {}).importedAt ? html`<span className="pill">Datos al ${new Date(ws.stores.own.importedAt).toLocaleDateString('es-CO')}</span>` : null}${!P.write ? html`<span className="pill demo">Solo lectura</span>` : null}</div>
+          <button type="button" className=${'btn sm cpbtn ' + (cpOpen ? 'primary' : '')} disabled=${!me.ai} title=${me.ai ? '' : 'Falta configurar la API de Claude en el servidor'} onClick=${() => setCpOpen(!cpOpen)} aria-expanded=${cpOpen}><${Icon} n="spark" />Copiloto</button>
         </header>
-        ${slowNote}
         <main id="content">${view}</main>
       </div>
       <${Copilot} E=${E} f=${f} open=${cpOpen} setOpen=${setCpOpen} msgs=${msgs} setMsgs=${setMsgs} actions=${actions} />
@@ -259,11 +290,68 @@
     </div>`;
   }
 
+  /* ---------- consola Tita: cuentas de clientes ---------- */
+  function AdminHome({ me, open }) {
+    const [orgs, setOrgs] = useState(null);
+    const [name, setName] = useState('');
+    const [team, setTeam] = useState(null);
+    const [tf, setTf] = useState({ name: '', email: '' });
+    const [msg, setMsg] = useState(null);
+    const load = () => { L.api('GET', '/admin/orgs').then(setOrgs).catch((e) => L.toast(e.message, 'bad')); L.api('GET', '/admin/team').then(setTeam).catch(() => {}); };
+    useEffect(() => { load(); }, []);
+    const create = async (e) => { e.preventDefault(); try { const r = await L.api('POST', '/admin/orgs', { name }); setName(''); open(r.id); } catch (x) { L.toast(x.message, 'bad'); } };
+    const addTeam = async (e) => { e.preventDefault(); try { const r = await L.api('POST', '/admin/team', tf); setMsg({ email: tf.email, pw: r.tempPassword }); setTf({ name: '', email: '' }); load(); } catch (x) { L.toast(x.message, 'bad'); } };
+    return html`<div className="adminhome"><header className="top"><div className="topctx"><span className="logo">T</span><b>Consola Tita · Pricing Intelligence 360°</b></div><span className="sm muted">${me.user.name}</span><button type="button" className="btn sm ghost" onClick=${() => L.api('POST', '/logout').then(() => location.reload())}>Cerrar sesión</button></header>
+      <div className="page">
+        ${!me.ai ? html`<${Note} tone="warn">El servidor no tiene configurada la API de Claude (ANTHROPIC_API_KEY): la importación automática funciona, pero no se pueden proponer categorías, clasificar ni usar el copiloto.<//>` : null}
+        ${me.user.mustChange ? null : null}
+        <header className="ph"><div><div className="eyebrow">Cuentas de clientes</div><h1>¿Qué cuentas administra Tita?</h1><p>Cada cuenta tiene su tienda, sus competidores, sus categorías y sus usuarios. El cliente solo ve su cuenta, y solo cuando la publicas.</p></div>
+          <form className="newacct" onSubmit=${create}><label className="fld" htmlFor="no-n"><span>Nueva cuenta</span><input id="no-n" placeholder="Nombre del cliente" value=${name} onInput=${(e) => setName(e.target.value)} /></label><button className="btn primary" type="submit" disabled=${!name.trim()}>Crear y configurar</button></form></header>
+        <section className="panel">${!orgs ? html`<span className="spin"></span>` : orgs.length ? html`<div className="tw"><table className="tbl"><thead><tr><th>Cliente</th><th>Estado</th><th className="num">Tiendas</th><th className="num">Productos</th><th className="num">Usuarios</th><th>Última actividad</th><th></th></tr></thead><tbody>${orgs.map((o) => html`<tr key=${o.id} className="click" onClick=${() => open(o.id)}><td><b>${o.name}</b><small>${o.id}</small></td><td><${Badge} tone=${o.published ? 'ok' : 'warn'}>${o.published ? 'Publicada' : 'En configuración'}<//>${o.last_job === 'running' || o.last_job === 'queued' ? html` <${Badge} tone="info">trabajo en curso<//>` : o.last_job === 'failed' ? html` <${Badge} tone="down">último trabajo falló<//>` : null}</td><td className="num">${o.stores}</td><td className="num">${o.products}</td><td className="num">${o.users}</td><td>${o.updated_at ? new Date(o.updated_at).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</td><td><button type="button" className="btn sm">Abrir</button></td></tr>`)}</tbody></table></div>` : html`<${Empty} icon="store" title="Aún no hay cuentas">Crea la primera cuenta con el nombre del cliente.<//>`}</section>
+        <section className="panel"><h2>Equipo Tita</h2><p className="muted">Administradores con acceso a todas las cuentas.</p>
+          ${msg ? html`<${Note}>Contraseña temporal de <b>${msg.email}</b>: <span className="mono sel">${msg.pw}</span>. Envíala por un canal seguro.<//>` : null}
+          ${team ? html`<ul className="plain">${team.map((t) => html`<li key=${t.id}>${t.name} · ${t.email}</li>`)}</ul>` : null}
+          <form className="mapact" onSubmit=${addTeam}><input aria-label="Nombre" placeholder="Nombre" value=${tf.name} onInput=${(e) => setTf({ ...tf, name: e.target.value })} /><input aria-label="Correo" type="email" placeholder="correo@titamedia.com" value=${tf.email} onInput=${(e) => setTf({ ...tf, email: e.target.value })} /><button className="btn sm" type="submit">Agregar administrador</button></form></section>
+      </div><${Toasts} /></div>`;
+  }
+
+  /* ---------- acceso ---------- */
+  function Login({ onDone }) {
+    const [email, setEmail] = useState(''); const [pw, setPw] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
+    const submit = async (e) => { e.preventDefault(); setBusy(true); setErr(''); try { await L.api('POST', '/login', { email, password: pw }); onDone(); } catch (x) { setErr(x.message); } setBusy(false); };
+    return html`<${Center}><div className="brandmark"><span className="logo">T</span>TITA Pricing Intelligence <b>360°</b></div><h1>Inteligencia de precios para tu catálogo</h1><form className="urlform" onSubmit=${submit}><label className="fld" htmlFor="lg-e"><span>Correo</span><input id="lg-e" type="email" autoComplete="username" value=${email} onInput=${(e) => setEmail(e.target.value)} /></label><label className="fld" htmlFor="lg-p"><span>Contraseña</span><input id="lg-p" type="password" autoComplete="current-password" value=${pw} onInput=${(e) => setPw(e.target.value)} /></label>${err ? html`<div className="err" role="alert">${err}</div>` : null}<button className="btn primary" type="submit" disabled=${busy || !email || !pw}>${busy ? 'Entrando…' : 'Entrar'}</button></form><p className="muted sm">¿No tienes acceso? Escríbele a tu contacto en Tita Media.</p><//>`;
+  }
+  function ChangePassword({ onDone }) {
+    const [pw, setPw] = useState(''); const [pw2, setPw2] = useState(''); const [err, setErr] = useState('');
+    const submit = async (e) => { e.preventDefault(); if (pw !== pw2) { setErr('Las contraseñas no coinciden.'); return; } try { await L.api('POST', '/me/password', { password: pw }); onDone(); } catch (x) { setErr(x.message); } };
+    return html`<${Center}><h2>Crea tu contraseña</h2><p className="muted">Entraste con una contraseña temporal. Elige una nueva de al menos 10 caracteres.</p><form className="urlform" onSubmit=${submit}><label className="fld" htmlFor="cp-1"><span>Nueva contraseña</span><input id="cp-1" type="password" autoComplete="new-password" value=${pw} onInput=${(e) => setPw(e.target.value)} /></label><label className="fld" htmlFor="cp-2"><span>Repítela</span><input id="cp-2" type="password" autoComplete="new-password" value=${pw2} onInput=${(e) => setPw2(e.target.value)} /></label>${err ? html`<div className="err">${err}</div>` : null}<button className="btn primary" type="submit">Guardar y continuar</button></form><//>`;
+  }
+
+  function App() {
+    const [me, setMe] = useState(undefined);
+    const [orgId, setOrgId] = useState(() => { try { return sessionStorage.getItem('tita-org'); } catch (e) { return null; } });
+    const [orgInfo, setOrgInfo] = useState(null);
+    const loadMe = () => L.api('GET', '/me').then((m) => { L.uid = m.user.id; L.role = m.user.role; setMe(m); }).catch(() => setMe(null));
+    useEffect(() => { L.onUnauth = () => setMe(null); loadMe(); }, []);
+    const target = me && me.user.role !== 'tita_admin' ? me.org && me.org.id : orgId;
+    const loadOrg = () => target && L.api('GET', '/orgs/' + target).then(setOrgInfo).catch(() => { setOrgId(null); });
+    useEffect(() => { setOrgInfo(null); loadOrg(); }, [target]);
+    const open = (id) => { try { sessionStorage.setItem('tita-org', id); } catch (e) { /* sin almacenamiento */ } location.hash = 'overview'; setOrgId(id); };
+    const back = () => { try { sessionStorage.removeItem('tita-org'); } catch (e) { /* sin almacenamiento */ } location.hash = ''; setOrgId(null); };
+    if (me === undefined) return html`<${Center}><span className="spin"></span><//>`;
+    if (me === null) return html`<${Login} onDone=${loadMe} />`;
+    if (me.user.mustChange) return html`<${ChangePassword} onDone=${loadMe} />`;
+    if (me.user.role === 'tita_admin' && !orgId) return html`<${AdminHome} me=${me} open=${open} />`;
+    if (!target) return html`<${Center}><h2>Tu usuario no tiene una cuenta asignada</h2><p className="muted">Pide acceso a tu contacto en Tita Media.</p><//>`;
+    if (!orgInfo) return html`<${Center}><span className="spin"></span><//>`;
+    return html`<${Workspace} key=${target} me=${me} orgId=${target} orgInfo=${orgInfo} onBack=${back} refreshOrg=${loadOrg} />`;
+  }
+
   class Boundary extends React.Component {
     constructor(p) { super(p); this.state = { err: null }; }
     static getDerivedStateFromError(err) { return { err }; }
     render() {
-      if (this.state.err) return html`<div className="ob"><div className="ob-in"><h2>Algo falló al dibujar esta vista</h2><p className="muted">${String(this.state.err && this.state.err.message)}</p><button className="btn primary" type="button" onClick=${() => { location.hash = 'overview'; location.reload(); }}>Volver al inicio</button></div></div>`;
+      if (this.state.err) return html`<div className="ob"><div className="ob-in"><h2>Algo falló al dibujar esta vista</h2><p className="muted">${String(this.state.err && this.state.err.message)}</p><button className="btn primary" type="button" onClick=${() => { location.hash = ''; location.reload(); }}>Volver al inicio</button></div></div>`;
       return this.props.children;
     }
   }

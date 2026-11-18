@@ -8,11 +8,25 @@
   const { Icon, Badge, Seg, Select, Empty, Note, Thumb } = UI;
 
   const nowIso = () => new Date().toISOString();
+  // Estado del último trabajo de un tipo (y tienda, si aplica)
+  A.lastJob = (jobs, type, sid) => (jobs || []).find((j) => j.type === type && (!sid || (j.params && j.params.sid) === sid));
+  A.JobLine = function ({ job }) {
+    if (!job) return null;
+    const p = job.progress || {}, r = p.result || {};
+    const live = job.status === 'queued' || job.status === 'running';
+    let detail = '';
+    if (job.type === 'ingest') detail = live ? (p.items ? p.items + ' productos leídos (' + (p.platform || '') + ', página ' + p.pages + ')' : 'Conectando con la tienda…') : r.items != null ? r.items + ' productos · ' + r.platform + (r.priceChanges ? ' · ' + r.priceChanges + ' cambios de precio' : '') : '';
+    else if (job.type === 'classify') detail = (p.done != null ? p.done + ' clasificados' : 'Preparando…') + (p.left != null ? ' · ' + p.left + ' en cola' : '') + (p.low ? ' · ' + p.low + ' con confianza baja' : '');
+    else if (job.type === 'map') detail = p.labels != null ? p.labels + ' de ' + p.total + ' etiquetas' : r.labels != null ? r.labels + ' etiquetas mapeadas' : '';
+    else if (job.type === 'propose') detail = r.categories != null ? r.categories + ' categorías propuestas' : 'Claude está leyendo el catálogo (1 a 3 minutos)…';
+    else if (job.type === 'refresh') detail = p.stores != null ? p.stores + ' tiendas actualizadas' : '';
+    return html`<div className=${'jobline j-' + job.status}>${live ? html`<span className="spin"></span>` : html`<${Icon} n=${job.status === 'done' ? 'check' : 'alert'} s=${14} />`}<span><b>${L.JOB[job.type]}</b> · ${{ queued: 'en cola', running: 'en curso', done: 'terminado', failed: 'falló' }[job.status]}${detail ? ' · ' + detail : ''}${job.status === 'failed' && job.error ? html`<br /><span className="err">${job.error}</span>` : null}</span><span className="muted sm">${new Date(job.updated_at || job.created_at).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}</span></div>`;
+  };
   A.defaultConfig = (o) => ({ storeName: '', market: 'CO', objective: 'competitividad', comps: [], cats: [], attrsOff: {}, franjas: {}, policy: { minMargin: 0.55, promoMinMargin: 0.35, rounding: 'psico', maxChange: 0.12 }, setupDone: false, step: 0, measured: null, ...o });
   A.saveConfig = (ws, patch) => L.set('ws/config', { ...A.defaultConfig(), ...(ws.ws.config || {}), ...patch });
 
   /* ---------- importación de un catálogo ---------- */
-  A.ImportPanel = function ({ ws, sid, ro, onSaved }) {
+  A.ImportPanel = function ({ ws, sid, ro, onSaved, jobs }) {
     const store = ws.stores[sid] || {};
     const origin = I.origin(store.url);
     const [text, setText] = useState('');
@@ -49,7 +63,12 @@
         setRes(null); setText(''); setBusy(''); onSaved && onSaved(all.length);
       } catch (e) { setBusy(''); }
     };
+    const job = A.lastJob(jobs, 'ingest', sid);
+    const live = job && (job.status === 'queued' || job.status === 'running');
     return html`<div className="imp">
+      ${origin ? html`<div className="autoimp"><div><b>Importación automática</b><p className="muted sm">El servidor lee el catálogo público de ${I.hostOf(origin)} (Shopify, WooCommerce o VTEX), respetando robots.txt, y lo actualiza cada día.</p></div><button type="button" className="btn primary sm" disabled=${ro || live} onClick=${() => L.runJob('ingest', { sid })}><${Icon} n="link" />${live ? 'Importando…' : 'Importar desde la URL'}</button></div>` : null}
+      <${A.JobLine} job=${job} />
+      <details className="manual"><summary className="sm">Importación manual (si la tienda no publica un catálogo leíble)</summary>
       ${origin ? html`<div className="implinks"><b>1. Abre el catálogo público de ${I.hostOf(origin)}</b><p className="muted sm">Abre el enlace de la plataforma de la tienda (los demás mostrarán un error). Si ves texto con productos, selecciónalo todo (Ctrl+A), cópialo y pégalo abajo. Repite con page=2, 3… para catálogos grandes.</p>
         <ul>${I.links(origin).map((l) => html`<li key=${l.platform}><a href=${l.url} target="_blank" rel="noopener noreferrer">${l.platform}<${Icon} n="link" s=${13} /></a><span className="muted sm">${l.note}</span></li>`)}</ul>
         <p className="muted sm">¿Otra plataforma? Abre una página de categoría de la tienda, copia todo el texto y pégalo: Claude extrae los productos.</p></div>` : null}
@@ -63,11 +82,11 @@
           <div className="tw"><table className="tbl"><thead><tr><th>Producto</th><th>Etiqueta</th><th className="num">Precio lista</th><th className="num">Promoción</th></tr></thead><tbody>${res.items.slice(0, 6).map((p) => html`<tr key=${p.id}><td>${p.name}</td><td>${p.label}</td><td className="num">${p.price.toLocaleString('es-CO')}</td><td className="num">${p.promo ? p.promo.toLocaleString('es-CO') : '—'}</td></tr>`)}</tbody></table></div>
           ${res.items.length > 6 ? html`<p className="muted sm">… y ${res.items.length - 6} más.</p>` : null}
           <div className="mapact"><button type="button" className="btn primary sm" disabled=${busy === 'save' || ro} onClick=${save}>${busy === 'save' ? 'Guardando…' : 'Guardar ' + res.items.length + ' productos'}</button><button type="button" className="btn sm ghost" onClick=${() => setRes(null)}>Descartar</button></div></div>` : null}
-      </div></div>`;
+      </div></details></div>`;
   };
 
   /* ---------- tiendas ---------- */
-  A.StoresPanel = function ({ ws, ro, only }) {
+  A.StoresPanel = function ({ ws, ro, only, jobs }) {
     const cfg = { ...A.defaultConfig(), ...(ws.ws.config || {}) };
     const [open, setOpen] = useState(null);
     const [nm, setNm] = useState(''); const [url, setUrl] = useState(''); const [err, setErr] = useState('');
@@ -82,6 +101,7 @@
       await L.set('stores/' + id, { name: nm.trim(), url: o, role: 'comp', n: 0, chunks: 0, createdAt: nowIso() });
       await A.saveConfig(ws, { comps: [...new Set([...(cfg.comps || []), id])] });
       setNm(''); setUrl(''); setOpen(id);
+      L.runJob('ingest', { sid: id });
     };
     const remove = async (id) => {
       const s = ws.stores[id];
@@ -92,9 +112,9 @@
     };
     return html`<div className="stores">
       ${ids.map((id) => { const s = ws.stores[id]; return html`<section key=${id} className="panel store">
-        <div className="row-between"><div><span className="eyebrow">${id === 'own' ? 'Tu tienda' : 'Competidor'}</span><h3>${s.name}</h3><span className="muted sm">${s.url ? I.hostOf(s.url) : 'sin URL'} · ${s.n || 0} productos${s.importedAt ? ' · actualizado ' + new Date(s.importedAt).toLocaleDateString('es-CO') : ''}</span></div>
+        <div className="row-between"><div><span className="eyebrow">${id === 'own' ? 'Tu tienda' : 'Competidor'}</span><h3>${s.name}</h3><span className="muted sm">${s.url ? I.hostOf(s.url) : 'sin URL'} · ${s.n || 0} productos${s.platform ? ' · ' + s.platform : ''}${s.importedAt ? ' · actualizado ' + new Date(s.importedAt).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }) : ''}</span>${s.lastError ? html`<div className="err sm">Último intento falló: ${s.lastError}</div>` : null}</div>
           <div className="mapact"><button type="button" className=${'btn sm ' + (open === id ? 'primary' : '')} onClick=${() => setOpen(open === id ? null : id)} aria-expanded=${open === id}><${Icon} n="upload" />${s.n ? 'Actualizar catálogo' : 'Importar catálogo'}</button>${id !== 'own' && !ro ? (del === id ? html`<button type="button" className="btn sm danger" onClick=${() => remove(id)}>Confirmar: eliminar tienda y su catálogo</button><button type="button" className="btn sm ghost" onClick=${() => setDel(null)}>Cancelar</button>` : html`<button type="button" className="btn sm ghost" onClick=${() => setDel(id)}>Eliminar</button>`) : null}</div></div>
-        ${open === id ? html`<${A.ImportPanel} ws=${ws} sid=${id} ro=${ro} onSaved=${() => setOpen(null)} />` : null}
+        ${open === id ? html`<${A.ImportPanel} ws=${ws} sid=${id} ro=${ro} jobs=${jobs} onSaved=${() => setOpen(null)} />` : html`<${A.JobLine} job=${A.lastJob(jobs, 'ingest', id)} />`}
       </section>`; })}
       ${only !== 'own' ? html`<form className="panel addstore" onSubmit=${add}><h3>Agregar competidor</h3><div className="two"><label className="fld" htmlFor="as-n"><span>Nombre de la marca</span><input id="as-n" type="text" value=${nm} onInput=${(e) => setNm(e.target.value)} disabled=${ro} /></label><label className="fld" htmlFor="as-u"><span>URL de su tienda online</span><input id="as-u" type="text" inputMode="url" value=${url} onInput=${(e) => setUrl(e.target.value)} placeholder="competidor.com" disabled=${ro} /></label></div>${err ? html`<div className="err">${err}</div>` : null}<div><button type="submit" className="btn sm primary" disabled=${ro}>Agregar</button></div></form>` : null}
     </div>`;
@@ -116,23 +136,21 @@
       ${onRemove && !ro ? html`<button type="button" className="btn sm ghost" onClick=${onRemove}>Quitar categoría</button>` : null}
     </details>`;
   }
-  A.CategoryStudio = function ({ ws, ro, onSaved }) {
+  A.CategoryStudio = function ({ ws, ro, onSaved, jobs }) {
     const cfg = { ...A.defaultConfig(), ...(ws.ws.config || {}) };
     const saved = Object.entries(ws.cats).map(([id, c]) => ({ ...c, id })).sort((a, b) => (a.order || 0) - (b.order || 0));
-    const [draft, setDraft] = useState(null);
+    const serverDraft = ws.drafts && ws.drafts.categories;
+    const [draft, setDraftRaw] = useState(null);
+    const [seen, setSeen] = useState(null);
+    if (serverDraft && serverDraft.at !== seen) { setSeen(serverDraft.at); setDraftRaw(serverDraft.cats.map((c, i) => ({ ...c, _open: i === 0, _on: true }))); }
+    const setDraft = (d) => { setDraftRaw(d); if (d === null && serverDraft) L.del('drafts/categories'); };
+    const pjob = A.lastJob(jobs, 'propose');
+    const plive = pjob && (pjob.status === 'queued' || pjob.status === 'running');
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState('');
     const ctl = useRef(null);
     const ownN = L.storeItems(ws, 'own').length;
-    const propose = async () => {
-      const sample = await I.sample();
-      if (!sample) { setErr('Claude no está disponible en esta vista.'); return; }
-      const own = L.storeItems(ws, 'own'); const comps = Object.keys(ws.stores).filter((s) => s !== 'own').flatMap((s) => L.storeItems(ws, s).slice(0, 400));
-      ctl.current = new AbortController(); setBusy(true); setErr('');
-      try { const cats = await I.proposeCategories(sample, own, comps, { storeName: cfg.storeName }, ctl.current.signal); setDraft(cats.map((c, i) => ({ ...c, _open: i === 0, _on: true }))); }
-      catch (e) { if (e.code !== 'cancelled') setErr(I.errText(e)); }
-      setBusy(false);
-    };
+    const propose = () => { setErr(''); L.runJob('propose'); };
     const saveDraft = async () => {
       const on = draft.filter((c) => c._on);
       for (const c of on) { const { _open, _on, ...rest } = c; await L.set('cats/' + c.id, { ...rest, createdAt: nowIso(), origin: 'ia' }); }
@@ -146,7 +164,8 @@
           ${draft.map((c, i) => html`<div key=${c.id} className="drow"><label className="tgl" htmlFor=${'dr-' + c.id}><input id=${'dr-' + c.id} type="checkbox" checked=${c._on} onChange=${(e) => setDraft(draft.map((x, k) => (k === i ? { ...x, _on: e.target.checked } : x)))} />Analizar</label><${CatEditor} c=${c} ro=${ro} onChange=${(n) => setDraft(draft.map((x, k) => (k === i ? n : x)))} /></div>`)}
           <div className="mapact"><button type="button" className="btn primary" disabled=${ro || !draft.some((c) => c._on)} onClick=${saveDraft}>Guardar categorías seleccionadas</button><button type="button" className="btn ghost" onClick=${() => setDraft(null)}>Descartar propuesta</button></div></section>`
         : html`<section className="panel"><div className="row-between"><div><h2>${saved.length ? 'Categorías de análisis' : 'Crea tus categorías con IA'}</h2><p className="muted">${saved.length ? 'Puedes editar nombres, tipos, materiales, colores y niveles de cada rúbrica.' : 'Claude lee tu catálogo y el de la competencia y propone categorías comparables, cada una con su rúbrica de atributos de 5 niveles. Tú decides cuáles quedan.'}</p></div>
-          ${busy ? html`<div className="mapact"><span className="spin"></span><span className="sm">Claude está leyendo ${ownN} productos (puede tardar hasta un minuto)…</span><button type="button" className="btn sm" onClick=${() => ctl.current && ctl.current.abort()}>Detener</button></div>` : html`<button type="button" className=${'btn ' + (saved.length ? 'sm' : 'primary')} disabled=${ro || !ownN} onClick=${propose}><${Icon} n="spark" />${saved.length ? 'Proponer de nuevo' : 'Proponer categorías y rúbricas'}</button>`}</div>
+          <button type="button" className=${'btn ' + (saved.length ? 'sm' : 'primary')} disabled=${ro || !ownN || plive} onClick=${propose}><${Icon} n="spark" />${plive ? 'Claude está trabajando…' : saved.length ? 'Proponer de nuevo' : 'Proponer categorías y rúbricas'}</button></div>
+          <${A.JobLine} job=${pjob} />
           ${!ownN ? html`<${Note} tone="warn">Primero importa el catálogo de tu tienda.<//>` : null}
           ${err ? html`<div className="err">${err}</div>` : null}
           ${saved.map((c) => { const cur = edit[c.id] || c; return html`<div key=${c.id} className="drow"><label className="tgl" htmlFor=${'ca-' + c.id}><input id=${'ca-' + c.id} type="checkbox" checked=${cfg.cats.includes(c.id)} disabled=${ro} onChange=${() => A.saveConfig(ws, { cats: cfg.cats.includes(c.id) ? cfg.cats.filter((x) => x !== c.id) : [...cfg.cats, c.id] })} />Analizar</label><${CatEditor} c=${cur} ro=${ro} onChange=${(n) => setEdit((e) => ({ ...e, [c.id]: n }))} />${edit[c.id] ? html`<div className="mapact"><button type="button" className="btn sm primary" onClick=${() => saveOne(edit[c.id])}>Guardar cambios</button><button type="button" className="btn sm ghost" onClick=${() => setEdit((e) => ({ ...e, [c.id]: undefined }))}>Descartar</button><span className="muted sm">Cambiar niveles no reclasifica productos ya calificados.</span></div>` : null}</div>`; })}
@@ -155,66 +174,32 @@
   };
 
   /* ---------- clasificación ---------- */
-  A.ClassifyPanel = function ({ ws, ro }) {
+  A.ClassifyPanel = function ({ ws, ro, jobs }) {
     const cfg = { ...A.defaultConfig(), ...(ws.ws.config || {}) };
     const cats = Object.entries(ws.cats).map(([id, c]) => ({ ...c, id })).filter((c) => cfg.cats.includes(c.id)).sort((a, b) => (a.order || 0) - (b.order || 0));
     const active = ['own', ...cfg.comps.filter((s) => ws.stores[s])];
     const items = useMemo(() => I.allItems(ws), [ws.catalog]);
     const cm = useMemo(() => I.classMap(ws), [ws.cls, ws.fixes]);
     const lm = useMemo(() => I.labelMap(ws), [ws.labelmap]);
-    const [size, setSize] = useState(40);
-    const [busy, setBusy] = useState('');
-    const [err, setErr] = useState('');
-    const [last, setLast] = useState(null);
-    const ctl = useRef(null);
     const groups = useMemo(() => {
       const g = {};
       Object.values(items).forEach((it) => { if (!active.includes(it.sid)) return; const k = it.sid + '|' + it.label; (g[k] = g[k] || { key: k, sid: it.sid, store: (ws.stores[it.sid] || {}).name, label: it.label, n: 0, examples: [] }); g[k].n++; if (g[k].examples.length < 4) g[k].examples.push(it.name); });
       return Object.values(g).sort((a, b) => (a.sid === 'own' ? -1 : 0) - (b.sid === 'own' ? -1 : 0) || b.n - a.n);
     }, [items, active.join(',')]);
     const unmapped = groups.filter((g) => !(g.key in lm));
-    const queue = Object.values(items).filter((it) => active.includes(it.sid) && !cm[it.pid] && lm[it.sid + '|' + it.label] !== null && lm[it.sid + '|' + it.label] !== undefined);
-    const ordered = [...queue.filter((it) => it.sid === 'own'), ...(() => { const by = {}; queue.filter((it) => it.sid !== 'own').forEach((it) => (by[it.sid] = by[it.sid] || []).push(it)); const out = []; const ls = Object.values(by); for (let i = 0; ls.some((l) => l[i]); i++) ls.forEach((l) => l[i] && out.push(l[i])); return out; })()];
+    const queue = Object.values(items).filter((it) => active.includes(it.sid) && !cm[it.pid] && lm[it.sid + '|' + it.label] !== null);
     const done = Object.values(items).filter((it) => active.includes(it.sid) && cm[it.pid]).length;
-    const relevant = Object.values(items).filter((it) => active.includes(it.sid) && lm[it.sid + '|' + it.label] !== null).length;
-    const run = async (fn) => {
-      const sample = await I.sample();
-      if (!sample) { setErr('Claude no está disponible en esta vista.'); return; }
-      ctl.current = new AbortController(); setErr('');
-      try { await fn(sample, ctl.current.signal); } catch (e) { if (e.code !== 'cancelled') setErr(e.code ? I.errText(e) : L.errText(e)); }
-      setBusy('');
-    };
-    const mapLabels = () => { setBusy('map'); run(async (sample, signal) => {
-      for (let i = 0; i < unmapped.length; i += 120) {
-        const part = unmapped.slice(i, i + 120);
-        const m = await I.mapLabels(sample, part, cats, signal);
-        part.forEach((g) => { if (!(g.key in m)) m[g.key] = 'mixed'; });
-        await L.set('labelmap/ia-' + Date.now(), { at: nowIso(), by: L.uid, items: m });
-      }
-    }); };
-    const classify = () => { setBusy('cls'); run(async (sample, signal) => {
-      const batch = ordered.slice(0, size);
-      const t0 = Date.now();
-      const res = await I.classifyBatch(sample, cats, batch, signal);
-      const items2 = {}; batch.forEach((p) => { if (res[p.id]) items2[p.pid] = res[p.id]; });
-      await L.set('cls/b-' + Date.now(), { at: nowIso(), by: L.uid, items: items2 });
-      setLast({ n: Object.keys(items2).length, sent: batch.length, secs: Math.round((Date.now() - t0) / 1000), low: Object.values(items2).filter((x) => x.conf === 'baja').length, none: Object.values(items2).filter((x) => !x.cat).length });
-    }); };
+    const relevant = done + queue.length;
+    const cj = A.lastJob(jobs, 'classify'), mj = A.lastJob(jobs, 'map');
+    const live = (j) => j && (j.status === 'queued' || j.status === 'running');
     const setMap = (key, v) => L.set('labelmap/manual', { at: nowIso(), items: { ...((ws.labelmap.manual || {}).items || {}), [key]: v === '_none' ? null : v } });
-    if (!cats.length) return html`<${Empty} title="Primero define las categorías">La clasificación usa las rúbricas de tus categorías.<//>`;
+    if (!cats.length) return html`<${Empty} title="Primero define las categorías">La clasificación usa las rúbricas de las categorías activas.<//>`;
     return html`<div className="clsp">
-      <section className="panel"><div className="row-between"><div><span className="eyebrow">Paso 1</span><h2>Mapear etiquetas de cada tienda</h2><p className="muted">Claude decide qué etiquetas del catálogo de cada tienda corresponden a tus categorías (por uso, no por nombre). Así solo se clasifican productos relevantes.</p></div>
-        ${busy === 'map' ? html`<div className="mapact"><span className="spin"></span><span className="sm">Mapeando ${unmapped.length} etiquetas…</span></div>` : html`<button type="button" className=${'btn ' + (unmapped.length ? 'primary' : 'sm')} disabled=${ro || !unmapped.length || !!busy} onClick=${mapLabels}><${Icon} n="spark" />${unmapped.length ? 'Mapear ' + unmapped.length + ' etiquetas' : 'Todo mapeado'}</button>`}</div>
+      <section className="panel"><div className="row-between"><div><h2>Clasificación con Claude</h2><p className="muted">El servidor mapea las etiquetas de cada tienda a tus categorías (por uso, no por nombre) y clasifica cada producto: categoría, tipo, material, color y nivel 1–5 por atributo, con una cita de evidencia. Corre en segundo plano y se repite cada día con los productos nuevos.</p></div>
+        <div className="mapact"><button type="button" className="btn" disabled=${ro || !unmapped.length || live(mj) || live(cj)} onClick=${() => L.runJob('map')}>${unmapped.length ? 'Solo mapear ' + unmapped.length + ' etiquetas' : 'Etiquetas mapeadas'}</button><button type="button" className="btn primary" disabled=${ro || live(cj) || (!queue.length && !unmapped.length)} onClick=${() => L.runJob('classify')}><${Icon} n="spark" />${live(cj) ? 'Clasificando…' : 'Clasificar todo'}</button></div></div>
+        <div className="progress"><div className="pbar"><i style=${{ width: (relevant ? Math.min(100, (done / relevant) * 100) : 0) + '%' }}></i></div><span><b>${done}</b> de ${relevant || done} productos relevantes clasificados · ${queue.length} en cola${unmapped.length ? ' · ' + unmapped.length + ' etiquetas sin mapear (sus productos entran al mapearlas)' : ''}</span></div>
+        <${A.JobLine} job=${mj} /><${A.JobLine} job=${cj} />
         <details><summary className="sm">Ver y corregir el mapeo (${groups.length} etiquetas)</summary><div className="tw"><table className="tbl"><thead><tr><th>Tienda</th><th>Etiqueta</th><th className="num">Productos</th><th>Categoría</th></tr></thead><tbody>${groups.map((g) => html`<tr key=${g.key}><td>${g.store}</td><td>${g.label}<small>${g.examples.slice(0, 2).join(' · ')}</small></td><td className="num">${g.n}</td><td><select aria-label=${'Categoría de ' + g.label} value=${g.key in lm ? (lm[g.key] === null ? '_none' : lm[g.key]) : ''} disabled=${ro} onChange=${(e) => setMap(g.key, e.target.value)}><option value="" disabled>Sin mapear</option><option value="mixed">Mixta: decidir por producto</option>${cats.map((c) => html`<option key=${c.id} value=${c.id}>${c.name}</option>`)}<option value="_none">No aplica</option></select></td></tr>`)}</tbody></table></div></details>
-      </section>
-      <section className="panel"><div className="row-between"><div><span className="eyebrow">Paso 2</span><h2>Clasificar atributos con Claude</h2><p className="muted">Cada producto recibe categoría, tipo, material, color y nivel 1–5 por atributo, con una cita de evidencia. Lo que no se puede inferir queda vacío y va a revisión.</p></div></div>
-        <div className="progress"><div className="pbar"><i style=${{ width: (relevant ? Math.min(100, (done / relevant) * 100) : 0) + '%' }}></i></div><span><b>${done}</b> de ${relevant} productos relevantes clasificados · ${queue.length} en cola</span></div>
-        ${unmapped.length ? html`<${Note} tone="warn">Hay ${unmapped.length} etiquetas sin mapear: sus productos no entran a la cola hasta mapearlas.<//>` : null}
-        <div className="mapact"><span className="sm muted">Productos por lote</span><${Seg} size="sm" label="Tamaño del lote" value=${size} onChange=${setSize} options=${[20, 40, 60].map((v) => ({ v, l: String(v) }))} />
-          ${busy === 'cls' ? html`<span className="spin"></span><span className="sm">Clasificando ${Math.min(size, queue.length)} productos (30 a 90 segundos)…</span><button type="button" className="btn sm" onClick=${() => ctl.current && ctl.current.abort()}>Detener</button>` : html`<button type="button" className="btn primary" disabled=${ro || !queue.length || !!busy} onClick=${classify}><${Icon} n="spark" />Clasificar siguiente lote</button>`}
-          ${queue.length ? html`<span className="muted sm">≈ ${Math.ceil(queue.length / size)} lotes restantes. Cada lote usa tu cuota de Claude y se lanza con un clic.</span>` : null}</div>
-        ${last ? html`<p className="sm">Último lote: ${last.n} de ${last.sent} clasificados en ${last.secs} s · ${last.low} con confianza baja · ${last.none} fuera de tus categorías.</p>` : null}
-        ${err ? html`<div className="err" role="alert">${err}</div>` : null}
       </section></div>`;
   };
 
@@ -296,9 +281,9 @@
   };
 
   /* ---------- módulo Catálogo y clasificación ---------- */
-  A.DataModule = function ({ ws, ro, sub, setSub, D }) {
+  A.DataModule = function ({ ws, ro, sub, setSub, D, jobs }) {
     const SUB = [['tiendas', 'Tiendas y catálogos'], ['categorias', 'Categorías y rúbricas'], ['clasificacion', 'Clasificación con IA'], ['revision', 'Revisión'], ['privados', 'Costos y ventas']];
-    const V = { tiendas: html`<${A.StoresPanel} ws=${ws} ro=${ro} />`, categorias: html`<${A.CategoryStudio} ws=${ws} ro=${ro} />`, clasificacion: html`<${A.ClassifyPanel} ws=${ws} ro=${ro} />`, revision: html`<${A.ReviewQueue} ws=${ws} ro=${ro} />`, privados: html`<${A.PrivateImport} ws=${ws} ro=${ro} />` };
+    const V = { tiendas: html`<${A.StoresPanel} ws=${ws} ro=${ro} jobs=${jobs} />`, categorias: html`<${A.CategoryStudio} ws=${ws} ro=${ro} jobs=${jobs} />`, clasificacion: html`<${A.ClassifyPanel} ws=${ws} ro=${ro} jobs=${jobs} />`, revision: html`<${A.ReviewQueue} ws=${ws} ro=${ro} />`, privados: html`<${A.PrivateImport} ws=${ws} ro=${ro} />` };
     const nStores = Object.keys(ws.stores).length;
     return html`<div className="page"><header className="ph"><div><div className="eyebrow">Catálogo y clasificación</div><h1>¿Qué datos alimentan el análisis?</h1><p>${nStores} tiendas · ${D ? D.totalItems : 0} productos importados · ${D ? D.products.filter((p) => p.cat).length : 0} clasificados en tus categorías${D && D.pending ? ' · ' + D.pending + ' sin clasificar' : ''}.</p></div></header>
       <nav className="tabs">${SUB.map(([k, l]) => html`<button key=${k} type="button" className=${sub === k ? 'on' : ''} onClick=${() => setSub(k)}>${l}</button>`)}</nav>
@@ -306,7 +291,7 @@
   };
 
   /* ---------- asistente inicial ---------- */
-  A.Setup = function ({ ws, ro }) {
+  A.Setup = function ({ ws, ro, jobs, orgName }) {
     const cfg = { ...A.defaultConfig(), ...(ws.ws.config || {}) };
     const step = cfg.step || 0;
     const go = (n, patch) => A.saveConfig(ws, { ...patch, step: n });
@@ -319,23 +304,25 @@
       if (!nm.trim() || !o) { setErr('Escribe el nombre de tu marca y la dirección de tu tienda.'); return; }
       await L.set('stores/own', { ...(ws.stores.own || {}), name: nm.trim(), url: o, role: 'own', n: (ws.stores.own || {}).n || 0, chunks: (ws.stores.own || {}).chunks || 0 });
       await go(1, { storeName: nm.trim(), market: mkt, objective: obj });
+      L.runJob('ingest', { sid: 'own' });
     };
     const stepper = html`<ol className="ob-steps" aria-label="Progreso">${steps.map((s, i) => html`<li key=${i} className=${i === step ? 'cur' : i < step ? 'done' : ''}><button type="button" disabled=${i > step || ro} onClick=${() => go(i)}><span>${i < step ? html`<${Icon} n="check" s=${12} />` : i + 1}</span>${s}</button></li>`)}</ol>`;
     let body;
     if (step === 0) body = html`<form className="urlform" onSubmit=${saveStore}>
-        <div className="two"><label className="fld" htmlFor="su-n"><span>Nombre de tu marca</span><input id="su-n" type="text" value=${nm} onInput=${(e) => setNm(e.target.value)} disabled=${ro} /></label><label className="fld" htmlFor="su-u"><span>Dirección de tu tienda online</span><input id="su-u" type="text" inputMode="url" placeholder="https://mitienda.com" value=${url} onInput=${(e) => setUrl(e.target.value)} disabled=${ro} /></label></div>
+        <div className="two"><label className="fld" htmlFor="su-n"><span>Marca del cliente</span><input id="su-n" type="text" value=${nm} onInput=${(e) => setNm(e.target.value)} disabled=${ro} /></label><label className="fld" htmlFor="su-u"><span>Tienda online del cliente</span><input id="su-u" type="text" inputMode="url" placeholder="https://mitienda.com" value=${url} onInput=${(e) => setUrl(e.target.value)} disabled=${ro} /></label></div>
         <div className="fld"><span>Mercado principal y moneda</span><${Seg} label="Mercado" value=${mkt} onChange=${setMkt} options=${Object.values(TP.MARKETS).map((m) => ({ v: m.id, l: m.name + ' · ' + m.currency }))} /></div>
         <div className="fld"><span>¿Qué quieres optimizar primero?</span><div className="opts">${A.OBJECTIVES.map((o) => html`<button key=${o.v} type="button" className=${'optc ' + (obj === o.v ? 'on' : '')} aria-pressed=${obj === o.v} onClick=${() => setObj(o.v)}><b>${o.l}</b><span>${o.d}</span></button>`)}</div></div>
         ${err ? html`<div className="err">${err}</div>` : null}
         <div className="ob-actions"><button className="btn primary" type="submit" disabled=${ro}>Continuar<${Icon} n="arrow" /></button></div></form>`;
-    else if (step === 1) body = html`<div><${A.StoresPanel} ws=${ws} ro=${ro} only="own" /><div className="ob-actions"><button className="btn primary" type="button" disabled=${ro || !(ws.stores.own && ws.stores.own.n)} onClick=${() => go(2)}>Continuar<${Icon} n="arrow" /></button></div></div>`;
-    else if (step === 2) body = html`<div><p className="muted">Agrega las marcas con las que te comparas (recomendado: 4 a 10) e importa su catálogo. ${compsWith.length} con productos.</p><${A.StoresPanel} ws=${ws} ro=${ro} only="comp" /><div className="ob-actions"><button className="btn primary" type="button" disabled=${ro || compsWith.length < 1} onClick=${() => go(3, { comps: [...new Set([...(cfg.comps || []), ...compsWith])] })}>Continuar<${Icon} n="arrow" /></button></div></div>`;
-    else if (step === 3) body = html`<div><${A.CategoryStudio} ws=${ws} ro=${ro} /><div className="ob-actions"><button className="btn primary" type="button" disabled=${ro || !cfg.cats.length} onClick=${() => go(4)}>Continuar<${Icon} n="arrow" /></button></div></div>`;
-    else body = html`<div><${A.ClassifyPanel} ws=${ws} ro=${ro} /><${Note}>Puedes entrar al panel en cualquier momento: el análisis usa lo que ya esté clasificado y la clasificación sigue en «Catálogo y clasificación».<//><div className="ob-actions"><button className="btn primary" type="button" disabled=${ro} onClick=${() => A.saveConfig(ws, { setupDone: true, step: 5 })}>Ir al panel<${Icon} n="arrow" /></button></div></div>`;
+    else if (step === 1) body = html`<div><${A.StoresPanel} ws=${ws} ro=${ro} only="own" jobs=${jobs} /><div className="ob-actions"><button className="btn primary" type="button" disabled=${ro || !(ws.stores.own && ws.stores.own.n)} onClick=${() => go(2)}>Continuar<${Icon} n="arrow" /></button></div></div>`;
+    else if (step === 2) body = html`<div><p className="muted">Agrega los competidores del cliente (recomendado: 4 a 10). Cada uno se importa automáticamente al agregarlo. ${compsWith.length} con productos.</p><${A.StoresPanel} ws=${ws} ro=${ro} only="comp" jobs=${jobs} /><div className="ob-actions"><button className="btn primary" type="button" disabled=${ro || compsWith.length < 1} onClick=${() => go(3, { comps: [...new Set([...(cfg.comps || []), ...compsWith])] })}>Continuar<${Icon} n="arrow" /></button></div></div>`;
+    else if (step === 3) body = html`<div><${A.CategoryStudio} ws=${ws} ro=${ro} jobs=${jobs} /><div className="ob-actions"><button className="btn primary" type="button" disabled=${ro || !cfg.cats.length} onClick=${() => go(4)}>Continuar<${Icon} n="arrow" /></button></div></div>`;
+    else body = html`<div><${A.ClassifyPanel} ws=${ws} ro=${ro} jobs=${jobs} /><${Note}>Puedes entrar al panel cuando quieras: el análisis usa lo ya clasificado y la clasificación sigue en segundo plano. El cliente no ve nada hasta que publiques la cuenta.<//><div className="ob-actions"><button className="btn primary" type="button" disabled=${ro} onClick=${() => A.saveConfig(ws, { setupDone: true, step: 5 })}>Ir al panel<${Icon} n="arrow" /></button></div></div>`;
     return html`<div className="ob"><div className="ob-in wide">
       <div className="brandmark"><span className="logo">T</span>TITA Pricing Intelligence <b>360°</b></div>
-      ${step === 0 ? html`<h1>Descubre oportunidades de rentabilidad en tu catálogo.</h1><p className="lead">Conecta tu tienda y la de tus competidores. Claude entiende los catálogos, propone las categorías y califica los atributos; el sistema compara, estima precios y te muestra qué revisar.</p>` : html`<h2>${steps[step]}</h2>`}
-      ${ro ? html`<${Note} tone="warn">Tienes acceso de solo lectura: quien administra este espacio de trabajo debe completar la configuración.<//>` : null}
+      <div className="eyebrow">Configuración de la cuenta · ${orgName || ''}</div>
+      ${step === 0 ? html`<h1>Configura la cuenta del cliente</h1><p className="lead">Registra la tienda del cliente y sus competidores. El servidor importa los catálogos, Claude propone categorías y clasifica los atributos, y cuando todo esté revisado publicas la cuenta para el cliente.</p>` : html`<h2>${steps[step]}</h2>`}
+
       ${stepper}${body}</div></div>`;
   };
 })();

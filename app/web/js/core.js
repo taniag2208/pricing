@@ -104,8 +104,10 @@
     E.cats.filter((c) => !E.model[c.id].ok).forEach((c) => alerts.push({ tone: 'warn', t: `${c.name}: sin estimación de precio`, d: `${E.model[c.id].n} productos comparables; el modelo necesita ${E.model[c.id].need}. Revisa equivalencias o agrega competidores.`, a: () => go('market', { cat: c.id, sub: 'homolog' }), al: 'Revisar equivalencias' }));
     if (E.pendingMaps) alerts.push({ tone: 'info', t: `${E.pendingMaps} equivalencias de categoría esperan tu revisión`, d: 'La IA propuso segmentar categorías mixtas y descartar algunas con nombre parecido. Ya se usan en el análisis; confírmalas.', a: () => go('market', { sub: 'homolog' }), al: 'Revisar' });
     promoHeavy.forEach((x) => alerts.push({ tone: 'info', t: `${A.brandName(E, x.b)} tiene ${Math.round(x.s * 100)} % de su oferta en promoción`, d: 'El modelo compara precios de lista. Usa la vista de precio promocional para ver su precio efectivo.', a: () => go('market', { sub: 'escalera', priceType: 'promo' }), al: 'Ver escalera' }));
-    if (!E.hasCost) alerts.push({ tone: 'info', t: 'Sin costos cargados', d: 'Sin costos no calculamos el precio mínimo rentable ni el margen de cada escenario.', a: () => go('data', { sub: 'privados' }), al: 'Cargar costos' });
-    if (E.D.pending) alerts.unshift({ tone: 'info', t: E.D.pending + ' productos importados sin clasificar', d: 'El análisis usa solo productos clasificados. Clasifica más lotes para ampliar la cobertura.', a: () => go('data', { sub: 'clasificacion' }), al: 'Clasificar' });
+    const recent = Object.entries(E.ws ? E.ws.history || {} : {}).flatMap(([sid, h]) => (h.changes || []).filter((x) => Date.now() - new Date(x.at).getTime() < 7 * 864e5).map((x) => ({ ...x, sid })));
+    if (recent.length) { const up = recent.filter((x) => x.to > x.from).length; alerts.unshift({ tone: 'info', t: recent.length + ' cambios de precio de la competencia en los últimos 7 días', d: up + ' subidas y ' + (recent.length - up) + ' bajadas en ' + new Set(recent.map((x) => x.sid)).size + ' tiendas, detectadas en la actualización diaria.', a: () => go('market', { sub: 'escalera' }), al: 'Ver escalera' }); }
+    if (!E.hasCost && E.P && E.P.priv) alerts.push({ tone: 'info', t: 'Sin costos cargados', d: 'Sin costos no calculamos el precio mínimo rentable ni el margen de cada escenario.', a: () => go(E.P.config ? 'data' : 'privados', { sub: 'privados' }), al: 'Cargar costos' });
+    if (E.D.pending && E.P && E.P.config) alerts.unshift({ tone: 'info', t: E.D.pending + ' productos importados sin clasificar', d: 'El análisis usa solo productos clasificados. Clasifica más lotes para ampliar la cobertura.', a: () => go('data', { sub: 'clasificacion' }), al: 'Clasificar' });
     const start = { competitividad: ['Revisa los productos por encima de su banda y la escalera de precios', 'market', { sub: 'escalera' }], rentabilidad: ['Empieza por los productos por debajo de su banda con evidencia consistente', 'advisor', { pos: 'below' }], lanzamientos: ['Simula el precio de tu próximo producto con comparables reales', 'launch', {}], promociones: ['Simula escenarios de descuento con su efecto en margen', 'promo', {}] }[obj];
     return html`<div className="page">
       <header className="ph"><div><div className="eyebrow">Overview</div><h1>¿Qué está pasando con tus precios?</h1><p>${E.D.brandById.own.name} frente a ${E.cfg.comps.length} competidores en ${E.cats.length} categorías · ${TP.MARKETS[E.cfg.market].name}, ${E.mk.currency}</p></div>
@@ -167,11 +169,12 @@
   };
 
   /* ---- Homologación ---- */
-  function Homolog({ E, f, setF, dec, setDec }) {
+  function Homolog({ E, f, setF, dec, setDec, P }) {
+    const lock = !(P && P.config);
     const [st, setSt] = useState('all');
     const [cf, setCf] = useState('all');
     const rows = E.H.filter((h) => E.cfg.cats.includes(h.cat) && E.cfg.comps.includes(h.brand) && (cf === 'all' || h.cat === cf) && (st === 'all' || h.status === st || (st === 'pending' && h.status !== 'equiv' && !dec.map[h.key])));
-    const setD = (k, v) => setDec({ ...dec, map: { ...dec.map, [k]: dec.map[k] === v ? undefined : v } });
+    const setD = (k, v) => { if (lock) return; setDec({ ...dec, map: { ...dec.map, [k]: dec.map[k] === v ? undefined : v } }); };
     const all = E.H.filter((h) => E.cfg.cats.includes(h.cat) && E.cfg.comps.includes(h.brand));
     const ST = { equiv: ['Equivalente', 'ok'], partial: ['Mixta: segmentar', 'warn'], noequiv: ['No equivalente', 'neutral'] };
     return html`<div>
@@ -179,7 +182,7 @@
         ${[['all', 'Todas', all.length], ['equiv', 'Equivalentes', all.filter((h) => h.status === 'equiv').length], ['partial', 'Mixtas', all.filter((h) => h.status === 'partial').length], ['noequiv', 'No equivalentes', all.filter((h) => h.status === 'noequiv').length], ['pending', 'Sin revisar', E.pendingMaps]].map(([k, l, n]) => html`<button key=${k} type="button" className=${'sumc ' + (st === k ? 'on' : '')} onClick=${() => setSt(k)}><b>${n}</b><span>${l}</span></button>`)}
         <${Select} id="h-cat" label="Mi categoría" value=${cf} onChange=${setCf} options=${[{ v: 'all', l: 'Todas' }, ...E.cats.map((c) => ({ v: c.id, l: c.name }))]} compact />
       </div>
-      <${Note}>La homologación se decide por <b>contenido</b>, no solo por nombres: la categoría que Claude asignó a cada producto (por su nombre y ficha), sus tipos, materiales y rango de precio. Una etiqueta mixta se segmenta y solo entran los productos equivalentes.<//>
+      ${lock ? html`<${Note}>Estas equivalencias las configura y revisa el equipo de Tita.<//>` : null}<${Note}>La homologación se decide por <b>contenido</b>, no solo por nombres: la categoría que Claude asignó a cada producto (por su nombre y ficha), sus tipos, materiales y rango de precio. Una etiqueta mixta se segmenta y solo entran los productos equivalentes.<//>
       <div className="maplist">${rows.map((h) => {
         const c = E.D.catById[h.cat], d = dec.map[h.key];
         const included = d === 'reject' ? false : h.status === 'noequiv' ? d === 'accept' || d === 'all' : true;
@@ -198,12 +201,12 @@
             <span><em>Rango de precio común</em>${Math.round(h.ov * 100)} %</span>
             <span className="sample">${h.sample.map((p) => html`<${Thumb} key=${p.id} p=${p} size=${30} />`)}</span>
           </div>
-          <div className="mapact">
+          ${lock ? null : html`<div className="mapact">
             ${h.status !== 'noequiv' ? html`<button type="button" className=${'btn sm ' + (d === 'accept' ? 'primary' : '')} onClick=${() => setD(h.key, 'accept')}><${Icon} n="check" />${h.status === 'partial' ? 'Aceptar segmentación' : 'Aceptar'}</button>` : html`<button type="button" className=${'btn sm ' + (d === 'accept' ? 'primary' : '')} onClick=${() => setD(h.key, 'accept')}>Incluir de todos modos</button>`}
             ${h.status === 'partial' ? html`<button type="button" className=${'btn sm ' + (d === 'all' ? 'primary' : '')} onClick=${() => setD(h.key, 'all')}>Corregir: incluir todo</button>` : null}
             ${h.status !== 'noequiv' ? html`<button type="button" className=${'btn sm ' + (d === 'reject' ? 'danger' : '')} onClick=${() => setD(h.key, 'reject')}><${Icon} n="x" />Descartar</button>` : null}
             <span className="muted sm">${h.status === 'noequiv' && d === 'accept' ? 'Atención: mezcla tipologías distintas en el modelo.' : 'Cada decisión recalcula comparables, franjas y modelo.'}</span>
-          </div>
+          </div>`}
         </article>`;
       })}${rows.length ? null : html`<${Empty} title="Nada en este filtro" />`}</div>
     </div>`;
@@ -228,6 +231,7 @@
   function BandEditor({ E, catId, setCfg }) {
     const conf = E.cfg.franjas[catId] || { mode: 'pct', p1: 33, p2: 67 };
     const b = E.band[catId];
+    if (!setCfg) return html`<div className="bandedit"><span className="muted sm">Franjas: Entrada &lt; ${TP.fmt(b.c1, E.mk, true)} ≤ Core &lt; ${TP.fmt(b.c2, E.mk, true)} ≤ Premium</span></div>`;
     const upd = (patch) => setCfg({ ...E.cfg, franjas: { ...E.cfg.franjas, [catId]: { ...conf, ...patch } } });
     return html`<div className="bandedit"><span className="muted">Franjas:</span>
       <${Seg} size="sm" label="Modo de franjas" value=${conf.mode || 'pct'} onChange=${(v) => upd(v === 'abs' ? { mode: 'abs', c1: Math.round(b.c1), c2: Math.round(b.c2) } : { mode: 'pct', p1: 33, p2: 67 })} options=${[{ v: 'pct', l: 'Percentiles del mercado' }, { v: 'abs', l: 'Valores fijos' }]} />
@@ -236,7 +240,7 @@
       <span className="muted sm">Entrada &lt; ${TP.fmt(b.c1, E.mk, true)} ≤ Core &lt; ${TP.fmt(b.c2, E.mk, true)} ≤ Premium</span></div>`;
   }
   A.BandEditor = BandEditor;
-  function CatVsCat({ E, f, setCfg, go }) {
+  function CatVsCat({ E, f, setCfg, go, P }) {
     const cat = E.D.catById[f.cat];
     const rows = brandStats(E, f, f.cat);
     const maps = E.H.filter((h) => h.cat === f.cat && f.brands.includes(h.brand) && h.status !== 'noequiv' && E.dec.map[h.key] !== 'reject');
@@ -251,7 +255,7 @@
     const ownPrem = own ? own.bandMix[2] : 0, mPrem = TP.mean(comps.map((c) => c.bandMix[2]));
     return html`<div>
       <div className="mapchips"><b>${cat.name}</b><${Icon} n="arrow" cls="muted" />${maps.map((h) => html`<span key=${h.key} className="mc">${h.label.name} <em>${A.brandName(E, h.brand)}${h.status === 'partial' && E.dec.map[h.key] !== 'all' ? ' · segmentada' : ''}</em></span>`)}<button className="linkbtn" type="button" onClick=${() => go('market', { sub: 'homolog' })}>Revisar equivalencias</button></div>
-      <${BandEditor} E=${E} catId=${f.cat} setCfg=${setCfg} />
+      <${BandEditor} E=${E} catId=${f.cat} setCfg=${P && P.config ? setCfg : null} />
       <div className="tw"><table className="tbl cvc"><thead><tr><th>Marca</th><th className="num">Productos</th><th className="num">Mín.</th><th className="num">Mediana</th><th className="num">Máx.</th><th style=${{ minWidth: '170px' }}>Distribución (P10–P90)</th><th>Entrada · Core · Premium</th><th>Material predominante</th><th className="num">Diversidad</th><th>Diferencial</th></tr></thead><tbody>
         ${rows.map((r) => html`<tr key=${r.id} className=${r.own ? 'ownrow' : ''}><td><b>${r.name}</b>${r.promoShare > 0.3 ? html` <${Badge} tone="info" title="Proporción de productos en promoción">${Math.round(r.promoShare * 100)} % promo<//>` : null}</td><td className="num">${r.n}</td><td className="num">${TP.fmt(r.min, E.mk, true)}</td><td className="num"><b>${TP.fmt(r.med, E.mk, true)}</b></td><td className="num">${TP.fmt(r.max, E.mk, true)}</td>
           <td><div className="mini-range" title=${TP.fmt(r.p10, E.mk) + ' – ' + TP.fmt(r.p90, E.mk)}><span className=${r.own ? 'own' : ''} style=${{ left: x(r.p10) + '%', width: Math.max(2, x(r.p90) - x(r.p10)) + '%' }}></span><i style=${{ left: x(r.med) + '%' }}></i></div></td>
@@ -269,7 +273,8 @@
   }
 
   /* ---- Producto vs producto ---- */
-  function ProdVsProd({ E, f, dec, setDec, focus, setFocus }) {
+  function ProdVsProd({ E, f, dec, setDec, focus, setFocus, P }) {
+    const lock = !(P && P.config);
     const cat = E.D.catById[f.cat];
     const own = A.viewOwn(E, f, f.cat);
     const pool = A.viewPool(E, f, f.cat);
@@ -309,7 +314,7 @@
             <div className="chead"><div><span className="muted">${A.brandName(E, x.q.brand)}</span><b>${x.q.name}</b><small>${x.q.typ} · ${x.q.mat} · ${x.q.color}${x.q.url ? html` · <a href=${x.q.url} target="_blank" rel="noopener noreferrer">ver en la tienda</a>` : null}</small></div><div className="cprice"><b>${TP.fmt(x.q.list, E.mk)}</b>${x.q.promo ? html`<small>promo ${TP.fmt(x.q.promo, E.mk)}</small>` : null}</div></div>
             <div className="cbadges"><${Badge} tone=${x.s.label === 'Muy similar' ? 'ok' : x.s.label === 'Similar' ? 'info' : 'neutral'}>${x.s.label}<//><span className="muted sm" title="Índice heurístico de 0 a 1 (tipología, material y distancia entre niveles). No es una probabilidad calibrada.">índice ${x.s.score.toFixed(2).replace('.', ',')}</span><${Badge} tone=${x.s.conf.startsWith('Clasificación') ? 'neutral' : 'warn'}>${x.s.conf}<//>${d === 'accept' ? html`<${Badge} tone="info">Confirmado por ti<//>` : null}</div>
             <p className="cexp">${explain(x)}</p>
-            <div className="mapact"><button type="button" className=${'btn sm ' + (d === 'accept' ? 'primary' : '')} onClick=${() => setD(x.key, 'accept')}><${Icon} n="check" />Es comparable</button><button type="button" className=${'btn sm ' + (d === 'reject' ? 'danger' : '')} onClick=${() => setD(x.key, 'reject')}><${Icon} n="x" />No es comparable</button></div>
+            ${lock ? null : html`<div className="mapact"><button type="button" className=${'btn sm ' + (d === 'accept' ? 'primary' : '')} onClick=${() => setD(x.key, 'accept')}><${Icon} n="check" />Es comparable</button><button type="button" className=${'btn sm ' + (d === 'reject' ? 'danger' : '')} onClick=${() => setD(x.key, 'reject')}><${Icon} n="x" />No es comparable</button></div>`}
           </div></article>`; })}</div>` : html`<${Empty} title="Sin comparables con similitud suficiente">Amplía los competidores de la vista o revisa la homologación.<//>`}
         <p className="foot">Íconos ilustrativos por tipo y color (las fotos de otras tiendas no se pueden cargar aquí; usa «ver en la tienda»). Los comparables descartados dejan de usarse en el Price Advisor.</p>
       </div></div>`;

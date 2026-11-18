@@ -1,0 +1,65 @@
+// Llamadas a Claude desde el servidor. La API key nunca llega al navegador.
+const AnthropicMod = require('@anthropic-ai/sdk');
+const { q } = require('./db');
+
+const Anthropic = AnthropicMod.default || AnthropicMod;
+const client = process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN ? new Anthropic() : null;
+const MODEL = process.env.AI_MODEL || 'claude-opus-5-5';
+const EFFORT = { quick: 'low', default: 'medium', complex: 'high' };
+
+const err = (code, message) => Object.assign(new Error(message || code), { code });
+
+function mapError(e) {
+  if (e && e.code) return e;
+  if (e instanceof Anthropic.RateLimitError) return err('rate_limited', 'Límite de uso de la API alcanzado.');
+  if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) return err('sampling_disabled', 'La API key de Anthropic no es válida o no tiene permisos.');
+  if (e instanceof Anthropic.BadRequestError) return err('invalid_request', e.message);
+  if (e instanceof Anthropic.APIError) return err('upstream_error', 'Error de la API (' + e.status + ').');
+  return err('upstream_error', (e && e.message) || 'Error desconocido');
+}
+
+async function call({ messages, system, tools, tier, maxTokens, orgId, userId, kind }) {
+  if (!client) throw err('sampling_disabled', 'Falta configurar ANTHROPIC_API_KEY en el servidor.');
+  const req = {
+    model: MODEL,
+    max_tokens: maxTokens || 16000,
+    messages,
+    output_config: { effort: EFFORT[tier] || 'medium' },
+    betas: ['server-side-fallback-2026-07-01'],
+    fallbacks: 'default',
+  };
+  if (system) req.system = system;
+  if (tools && tools.length) req.tools = tools;
+  let res;
+  try { res = await client.beta.messages.create(req); } catch (e) { throw mapError(e); }
+  q('insert into ai_usage (org_id, user_id, kind, model, input_tokens, output_tokens) values ($1,$2,$3,$4,$5,$6)', [orgId || null, userId || null, kind || null, res.model, res.usage && res.usage.input_tokens, res.usage && res.usage.output_tokens]).catch(() => {});
+  if (res.stop_reason === 'refusal') throw err('refused', 'Claude no procesó este contenido.');
+  return res;
+}
+
+const textOf = (res) => res.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+
+function parseJson(text) {
+  const t = (text || '').trim();
+  try { return JSON.parse(t); } catch (e) { /* sigue */ }
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) { try { return JSON.parse(fence[1]); } catch (e) { /* sigue */ } }
+  const a = Math.min(...['{', '['].map((c) => { const i = t.indexOf(c); return i < 0 ? Infinity : i; }));
+  const b = Math.max(t.lastIndexOf('}'), t.lastIndexOf(']'));
+  if (isFinite(a) && b > a) { try { return JSON.parse(t.slice(a, b + 1)); } catch (e) { /* sigue */ } }
+  throw err('invalid_json', 'La respuesta no llegó en JSON.');
+}
+
+async function json(prompt, opts = {}) {
+  const content = [];
+  (opts.images || []).forEach((im) => content.push({ type: 'image', source: { type: 'base64', media_type: im.media_type, data: im.data } }));
+  content.push({ type: 'text', text: prompt });
+  const res = await call({ messages: [{ role: 'user', content }], tier: opts.tier, maxTokens: opts.maxTokens || 16000, orgId: opts.orgId, userId: opts.userId, kind: opts.kind });
+  if (res.stop_reason === 'max_tokens') throw err('invalid_json', 'La respuesta se cortó por longitud; usa un lote más pequeño.');
+  return parseJson(textOf(res));
+}
+
+// Fachada compatible con la interfaz que usan los prompts de ingest.js
+const facade = (ctx) => ({ json: (prompt, o = {}) => json(prompt, { ...ctx, tier: o.modelTier, kind: o.kind || ctx.kind }) });
+
+module.exports = { call, json, facade, textOf, configured: () => !!client, MODEL };
