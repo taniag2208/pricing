@@ -39,7 +39,8 @@ const PLATFORMS = {
   VTEX: { first: (o) => o + '/api/catalog_system/pub/products/search?_from=0&_to=49', page: (o, n) => o + '/api/catalog_system/pub/products/search?_from=' + (n - 1) * 50 + '&_to=' + ((n - 1) * 50 + 49), count: (j) => (Array.isArray(j) && (!j.length || j[0].productName) ? j.length : -1) },
 };
 
-async function crawl(storeUrl, onProgress) {
+async function crawl(storeUrl, onProgress, opts = {}) {
+  const maxPages = opts.maxPages || MAX_PAGES;
   const origin = TP.ingest.origin(storeUrl);
   if (!origin) throw new Error('URL inválida');
   const allowed = await robots(origin);
@@ -55,7 +56,7 @@ async function crawl(storeUrl, onProgress) {
     const add = (json) => TP.ingest.parseText(JSON.stringify(json), origin).items.forEach((p) => { by[p.id] = p; });
     add(j);
     let n = 1, last = P.count(j);
-    while (last > 0 && n < MAX_PAGES) {
+    while (last > 0 && n < maxPages) {
       n++;
       const pu = new URL(P.page(origin, n));
       if (!allowed(pu.pathname + pu.search)) break;

@@ -46,7 +46,9 @@ function anthropic(port, log) {
       const last = j.messages[j.messages.length - 1];
       const text = typeof last.content === 'string' ? last.content : last.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
       let content, stop = 'end_turn';
-      if (j.tools && j.tools.length) {
+      if (j.tools && j.tools.length && String(j.tools[0].type || '').startsWith('web_search')) {
+        content = [{ type: 'text', text: JSON.stringify({ country: 'CO', storeName: 'Marca Propia', competitors: [{ name: 'Alfa', url: 'http://127.0.0.1:4102' }, { name: 'Sin catálogo', url: 'http://127.0.0.1:4999' }, { name: 'Beta', url: 'http://127.0.0.1:4103' }, { name: 'Gama', url: 'http://127.0.0.1:4104' }] }) }];
+      } else if (j.tools && j.tools.length) {
         const hasResult = Array.isArray(last.content) && last.content.some((b) => b.type === 'tool_result');
         if (!hasResult) { content = [{ type: 'tool_use', id: 'tu_1', name: 'resumen_categorias', input: {} }]; stop = 'tool_use'; }
         else { const r = last.content[0].content; content = [{ type: 'text', text: 'Resumen recibido: ' + String(r).slice(0, 60) + '…' }]; }

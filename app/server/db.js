@@ -70,6 +70,17 @@ create table if not exists ai_usage (
   output_tokens integer,
   at timestamptz not null default now()
 );
+alter table orgs add column if not exists kind text not null default 'client';
+alter table orgs add column if not exists expires_at timestamptz;
+alter table orgs add column if not exists meta jsonb not null default '{}';
+create table if not exists quick_runs (
+  id bigserial primary key,
+  ip text,
+  org_id text,
+  at timestamptz not null default now()
+);
+create index if not exists quick_runs_at on quick_runs (at);
+create index if not exists ai_usage_user_at on ai_usage (user_id, kind, at);
 `;
 
 async function migrate() { await pool.query(SCHEMA); }

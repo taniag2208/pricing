@@ -59,7 +59,20 @@ async function json(prompt, opts = {}) {
   return parseJson(textOf(res));
 }
 
+// Investigación con búsqueda web (herramienta de servidor de Anthropic); reanuda turnos pausados.
+async function research(prompt, opts = {}) {
+  let messages = [{ role: 'user', content: prompt }];
+  let res;
+  for (let i = 0; i < 4; i++) {
+    res = await call({ messages, tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: opts.maxUses || 6 }], tier: 'default', maxTokens: 16000, orgId: opts.orgId, userId: opts.userId, kind: opts.kind || 'research' });
+    if (res.stop_reason !== 'pause_turn') break;
+    messages = [...messages, { role: 'assistant', content: res.content }];
+  }
+  if (res.stop_reason === 'pause_turn') throw err('upstream_error', 'La búsqueda no terminó.');
+  return parseJson(textOf(res));
+}
+
 // Fachada compatible con la interfaz que usan los prompts de ingest.js
 const facade = (ctx) => ({ json: (prompt, o = {}) => json(prompt, { ...ctx, tier: o.modelTier, kind: o.kind || ctx.kind }) });
 
-module.exports = { call, json, facade, textOf, configured: () => !!client, MODEL };
+module.exports = { call, json, research, facade, textOf, configured: () => !!client, MODEL };

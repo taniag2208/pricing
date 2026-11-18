@@ -5,7 +5,7 @@ const { q } = require('./db');
 const store = require('./store');
 const ai = require('./ai');
 const { crawl } = require('./scrape');
-const { id } = require('./util');
+const { id, slug } = require('./util');
 const TP = require('./shared');
 const I = TP.ingest;
 
@@ -108,6 +108,105 @@ const RUN = {
     }
     return { classified: total, batches, low, none };
   },
+  // Análisis rápido desde un link: tienda → competidores (búsqueda web) → categorías → clasificación.
+  async quick(job) {
+    const org = job.org_id;
+    const st = { ...(job.progress || {}) };
+    const save = (patch) => { Object.assign(st, patch); return progress(job.id, st); };
+    const phase = st.phase || 'own';
+    const cap = (items, n) => (items.length <= n ? items : items.filter((_, i) => i % Math.ceil(items.length / n) === 0).slice(0, n));
+    const owner = { orgId: org, userId: 'invitado' };
+    if (phase === 'own') {
+      const s = await store.get(org, 'stores', 'own');
+      let res;
+      try { res = await crawl(s.url, null, { maxPages: Number(process.env.QUICK_OWN_PAGES || 3) }); }
+      catch (e) { throw new Error('No pudimos leer el catálogo público de ' + s.url + '. El análisis funciona con tiendas Shopify, WooCommerce o VTEX que publican su catálogo.'); }
+      const items = cap(res.items, Number(process.env.QUICK_OWN_MAX || 90));
+      if (items.length < 8) throw new Error('La tienda publica muy pocos productos (' + items.length + ') para analizar.');
+      const chunks = await saveCatalog(org, 'own', items, 0);
+      await store.put(org, 'stores', 'own', { ...s, n: items.length, total: res.items.length, chunks, platform: res.platform, importedAt: new Date().toISOString() }, 'sistema');
+      await save({ phase: 'discover', own: items.length, ownTotal: res.items.length, platform: res.platform });
+      return { partial: true };
+    }
+    if (phase === 'discover') {
+      const s = await store.get(org, 'stores', 'own');
+      const ws = await store.snapshot(org);
+      const own = Object.values(ws.catalog).flatMap((c) => c.items || []);
+      const labels = {}; own.forEach((p) => (labels[p.label] = (labels[p.label] || 0) + 1));
+      const tld = (new URL(s.url).hostname.split('.').pop() || '').toLowerCase();
+      const out = await ai.research('Eres analista de pricing de retail en Latinoamérica. Usa la búsqueda web para encontrar las tiendas online que compiten directamente con esta tienda.\n\n' +
+        'Tienda: ' + s.url + ' (dominio .' + tld + ')\nCategorías del catálogo: ' + Object.entries(labels).sort((a, b) => b[1] - a[1]).slice(0, 8).map((x) => x[0]).join(', ') + '\nEjemplos de productos y precios: ' + own.slice(0, 15).map((p) => p.name + ' (' + p.price + ')').join('; ') + '\n\n' +
+        'Busca 6 a 8 marcas o tiendas competidoras directas: mismo país de venta, mismo tipo de producto y rango de precio parecido, con tienda online propia. Excluye marketplaces y tiendas por departamentos (Mercado Libre, Amazon, Falabella, Linio, Dafiti, Éxito, Liverpool, Ripley, Paris, Walmart, Shein) y la propia tienda.\n' +
+        'Responde solo JSON: {"country": "CO"|"MX"|"PE"|"CL"|otro código ISO, "storeName": "nombre comercial de la tienda", "competitors": [{"name": "Marca", "url": "https://dominio-de-su-tienda"}]}', { ...owner, kind: 'quick-competitors', maxUses: 6 });
+      const comps = (out.competitors || []).filter((c) => c && c.url && /^https?:\/\//.test(c.url)).slice(0, 8);
+      if (!comps.length) throw new Error('No encontramos competidores para comparar.');
+      const market = ['CO', 'MX', 'PE', 'CL'].includes(out.country) ? out.country : 'CO';
+      await store.put(org, 'stores', 'own', { ...s, name: out.storeName || s.name }, 'sistema');
+      await save({ phase: 'comps', candidates: comps, market, storeName: out.storeName || s.name });
+      return { partial: true };
+    }
+    if (phase === 'comps') {
+      const found = st.found || [], tried = st.tried || [];
+      for (const c of st.candidates) {
+        if (found.length >= Number(process.env.QUICK_COMPS || 5) || Date.now() > job.deadline - 40000) break;
+        if (tried.includes(c.url)) continue;
+        tried.push(c.url);
+        try {
+          const res = await crawl(c.url, null, { maxPages: 1 });
+          if (res.items.length < 10) continue;
+          let sid = slug(c.name); if (sid === 'own' || found.some((f) => f.sid === sid)) sid += '-' + found.length;
+          const items = cap(res.items, Number(process.env.QUICK_COMP_MAX || 55));
+          const chunks = await saveCatalog(org, sid, items, 0);
+          await store.put(org, 'stores', sid, { name: c.name, url: res.origin, role: 'comp', n: items.length, chunks, platform: res.platform, importedAt: new Date().toISOString() }, 'sistema');
+          found.push({ sid, name: c.name, n: items.length });
+        } catch (e) { /* sin catálogo público: se omite */ }
+        await save({ found, tried });
+      }
+      const pending = st.candidates.some((c) => !tried.includes(c.url)) && found.length < Number(process.env.QUICK_COMPS || 5);
+      if (pending) return { partial: true };
+      if (!found.length) throw new Error('Ninguno de los competidores encontrados publica un catálogo que podamos leer. Prueba con otra tienda.');
+      await save({ phase: 'cats' });
+      return { partial: true };
+    }
+    if (phase === 'cats') {
+      const ws = await store.snapshot(org);
+      const own = Object.values(ws.catalog).filter((c) => c.sid === 'own').flatMap((c) => c.items || []);
+      const comps = Object.values(ws.catalog).filter((c) => c.sid !== 'own').flatMap((c) => c.items || []);
+      const cats = (await I.proposeCategories(ai.facade({ ...owner, kind: 'quick-categories' }), own, comps, { storeName: st.storeName || '' })).slice(0, Number(process.env.QUICK_CATS || 3));
+      for (const c of cats) await store.put(org, 'cats', c.id, { ...c, origin: 'ia', createdAt: new Date().toISOString() }, 'sistema');
+      await store.put(org, 'ws', 'config', { storeName: st.storeName || '', market: st.market || 'CO', objective: 'competitividad', comps: (st.found || []).map((f) => f.sid), cats: cats.map((c) => c.id), attrsOff: {}, franjas: {}, policy: { minMargin: 0.55, promoMinMargin: 0.35, rounding: 'psico', maxChange: 0.12 }, setupDone: false, step: 4, measured: null }, 'sistema');
+      await save({ phase: 'classify', cats: cats.map((c) => c.name) });
+      return { partial: true };
+    }
+    if (phase === 'classify') {
+      await RUN.map({ ...job, id: 'sin-progreso', params: {} });
+      for (;;) {
+        const ws = await store.snapshot(org);
+        const cats = catsOf(ws);
+        const active = activeStores(ws), lm = I.labelMap(ws), cm = I.classMap(ws), items = I.allItems(ws);
+        const queue = Object.values(items).filter((it) => active.includes(it.sid) && !cm[it.pid] && lm[it.sid + '|' + it.label] != null);
+        const done = Object.values(items).filter((it) => cm[it.pid]).length;
+        await save({ classified: done, left: queue.length });
+        if (!queue.length) break;
+        if (Date.now() > job.deadline - 120000) return { partial: true };
+        const batches = [];
+        for (let i = 0; i < Math.min(3, Math.ceil(queue.length / BATCH)); i++) batches.push(queue.slice(i * BATCH, (i + 1) * BATCH).map((p) => ({ ...p, id: p.pid })));
+        const results = await Promise.allSettled(batches.map((b) => I.classifyBatch(ai.facade({ ...owner, kind: 'quick-classify' }), cats, b)));
+        let wrote = 0;
+        for (let i = 0; i < batches.length; i++) {
+          if (results[i].status !== 'fulfilled') continue;
+          const out = {}; batches[i].forEach((p) => { if (results[i].value[p.id]) out[p.id] = results[i].value[p.id]; });
+          if (Object.keys(out).length) { await store.put(org, 'cls', 'b-' + Date.now() + '-' + i, { at: new Date().toISOString(), by: 'sistema', items: out }, 'sistema'); wrote++; }
+        }
+        if (!wrote) throw new Error('Claude no pudo clasificar los productos. Intenta de nuevo en unos minutos.');
+      }
+      const cfg = await store.get(org, 'ws', 'config');
+      await store.put(org, 'ws', 'config', { ...cfg, setupDone: true }, 'sistema');
+      await save({ phase: 'done' });
+      return { done: true };
+    }
+    return { done: true };
+  },
   async refresh(job) {
     const org = job.org_id;
     const ws = await store.snapshot(org);
@@ -149,7 +248,8 @@ async function drain(org, ms) {
   return n;
 }
 async function enqueueRefreshAll() {
-  const r = await q('select id from orgs where published');
+  await q("delete from orgs where kind = 'quick' and expires_at < now()").catch(() => {});
+  const r = await q("select id from orgs where published and kind = 'client'");
   for (const o of r.rows) await enqueue(o.id, 'refresh', {}, 'sistema');
   return r.rows.length;
 }

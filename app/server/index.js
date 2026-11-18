@@ -45,7 +45,15 @@ function sign(res, u) {
 }
 async function auth(req, res, next) {
   try {
-    const t = req.cookies.tps; if (!t) throw 0;
+    const t = req.cookies.tps;
+    if (!t) {
+      // Invitado de un análisis rápido: solo lectura y solo su análisis
+      const g = req.cookies.tpg; if (!g) throw 0;
+      const { gid, org } = jwt.verify(g, SECRET);
+      const o = (await q("select id from orgs where id = $1 and kind = 'quick' and (expires_at is null or expires_at > now())", [org])).rows[0];
+      if (!o) throw 0;
+      req.user = { id: 'guest:' + gid, email: null, name: 'Invitado', role: 'viewer', org_id: org, must_change: false, guest: true }; req.level = 1; return next();
+    }
     const { uid } = jwt.verify(t, SECRET);
     const r = await q('select id, email, name, role, org_id, must_change from users where id = $1', [uid]);
     if (!r.rows[0]) throw 0;
@@ -72,10 +80,11 @@ app.post('/api/login', wrap(async (req, res) => {
   sign(res, u); audit(u.org_id, u.id, 'login');
   res.json({ ok: true });
 }));
-app.post('/api/logout', (req, res) => { res.clearCookie('tps'); res.json({ ok: true }); });
+app.post('/api/logout', (req, res) => { res.clearCookie('tps'); res.clearCookie('tpg'); res.json({ ok: true }); });
 app.get('/api/me', auth, wrap(async (req, res) => {
   const org = req.user.org_id ? (await q('select id, name, published from orgs where id = $1', [req.user.org_id])).rows[0] : null;
-  res.json({ user: { id: req.user.id, email: req.user.email, name: req.user.name, role: req.user.role, mustChange: req.user.must_change }, org, ai: ai.configured() });
+  const o2 = org ? (await q('select kind, expires_at, meta from orgs where id = $1', [org.id])).rows[0] : null;
+  res.json({ user: { id: req.user.id, email: req.user.email, name: req.user.name, role: req.user.role, mustChange: req.user.must_change, guest: !!req.user.guest }, org: org && { ...org, kind: o2.kind, expiresAt: o2.expires_at, url: o2.meta && o2.meta.url }, ai: ai.configured() });
 }));
 app.post('/api/me/password', auth, wrap(async (req, res) => {
   const pw = String(req.body.password || '');
@@ -94,7 +103,7 @@ app.get('/api/admin/orgs', auth, titaOnly, wrap(async (req, res) => {
       (select coalesce(sum(jsonb_array_length(d.data->'items')),0) from docs d where d.org_id = o.id and d.coll = 'catalog' and not d.deleted) as products,
       (select max(updated_at) from docs d where d.org_id = o.id) as updated_at,
       (select status from jobs j where j.org_id = o.id order by created_at desc limit 1) as last_job
-    from orgs o order by o.created_at desc`);
+    from orgs o where o.kind = 'client' order by o.created_at desc`);
   res.json(r.rows);
 }));
 app.post('/api/admin/orgs', auth, titaOnly, wrap(async (req, res) => {
@@ -147,7 +156,7 @@ app.post('/api/admin/team', auth, titaOnly, wrap(async (req, res) => {
 
 /* ---------- datos de cada cuenta ---------- */
 app.get('/api/orgs/:org', auth, orgAccess(1), wrap(async (req, res) => {
-  const r = await q('select id, name, published from orgs where id = $1', [req.params.org]);
+  const r = await q("select id, name, published, kind, expires_at, meta->>'url' as url from orgs where id = $1", [req.params.org]);
   if (!r.rows[0]) throw fail(404, 'not_found', 'Cuenta no encontrada.');
   res.json(r.rows[0]);
 }));
@@ -210,6 +219,59 @@ app.get('/api/cron', wrap(async (req, res) => {
   res.json({ orgs, steps });
 }));
 
+/* ---------- análisis rápido desde un link (público, con topes) ---------- */
+const TPI = require('./shared');
+const ipOf = (req) => crypto.createHash('sha256').update(String(req.ip || '') + SECRET).digest('hex').slice(0, 24);
+async function sessionUser(req) {
+  try { const { uid } = jwt.verify(req.cookies.tps || '', SECRET); const r = await q('select id, role from users where id = $1', [uid]); return r.rows[0] || null; } catch (e) { return null; }
+}
+app.post('/api/quick', wrap(async (req, res) => {
+  const origin = TPI.ingest.origin(String(req.body.url || ''));
+  if (!origin) throw fail(400, 'invalid_url', 'Escribe una dirección válida, por ejemplo mitienda.com');
+  if (!ai.configured()) throw fail(503, 'sampling_disabled', 'El análisis con IA no está disponible en este momento.');
+  const u = await sessionUser(req);
+  const tita = u && u.role === 'tita_admin';
+  if (!tita) {
+    const ip = ipOf(req);
+    const mine = (await q("select count(*)::int as n from quick_runs where ip = $1 and at > now() - interval '24 hours'", [ip])).rows[0].n;
+    if (mine >= Number(process.env.QUICK_PER_IP_DAY || 3)) throw fail(429, 'rate_limited', 'Llegaste al límite de análisis por hoy. Escríbenos para ver más tiendas.');
+    const all = (await q("select count(*)::int as n from quick_runs where at > now() - interval '24 hours'")).rows[0].n;
+    if (all >= Number(process.env.QUICK_DAILY_CAP || 40)) throw fail(429, 'rate_limited', 'Hoy hay mucha demanda de análisis. Intenta mañana.');
+  }
+  const host = TPI.ingest.hostOf(origin);
+  const oid = 'q-' + crypto.randomBytes(5).toString('hex');
+  const token = crypto.randomBytes(18).toString('base64url');
+  await q("insert into orgs (id, name, published, kind, expires_at, meta) values ($1,$2,true,'quick', now() + interval '7 days', $3)", [oid, host, { url: origin, tokenHash: crypto.createHash('sha256').update(token).digest('hex'), by: u ? u.id : null }]);
+  await q('insert into quick_runs (ip, org_id) values ($1,$2)', [ipOf(req), oid]);
+  await store.put(oid, 'stores', 'own', { name: host, url: origin, role: 'own', n: 0, chunks: 0 }, 'sistema');
+  await jobs.enqueue(oid, 'quick', {}, u ? u.id : 'invitado');
+  if (!u) res.cookie('tpg', jwt.sign({ gid: crypto.randomBytes(6).toString('hex'), org: oid }, SECRET, { expiresIn: '7d' }), { httpOnly: true, sameSite: 'lax', secure: process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : PROD, maxAge: 7 * 864e5 });
+  res.json({ org: oid, token });
+}));
+// Abrir un análisis compartido con su link
+app.post('/api/quick/open', wrap(async (req, res) => {
+  const h = crypto.createHash('sha256').update(String(req.body.token || '')).digest('hex');
+  const r = await q("select id from orgs where kind = 'quick' and meta->>'tokenHash' = $1 and expires_at > now()", [h]);
+  if (!r.rows[0]) throw fail(404, 'not_found', 'Este análisis no existe o ya expiró.');
+  res.cookie('tpg', jwt.sign({ gid: crypto.randomBytes(6).toString('hex'), org: r.rows[0].id }, SECRET, { expiresIn: '7d' }), { httpOnly: true, sameSite: 'lax', secure: process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : PROD, maxAge: 7 * 864e5 });
+  res.json({ org: r.rows[0].id });
+}));
+app.get('/api/quick/:org/status', auth, orgAccess(1), wrap(async (req, res) => {
+  const r = await q("select status, progress, error, updated_at from jobs where org_id = $1 and type = 'quick' order by created_at desc limit 1", [req.params.org]);
+  res.json(r.rows[0] || null);
+}));
+app.post('/api/quick/:org/pump', auth, orgAccess(1), wrap(async (req, res) => {
+  const k = (await q('select kind from orgs where id = $1', [req.params.org])).rows[0];
+  if (!k || k.kind !== 'quick') throw fail(400, 'invalid', 'No es un análisis rápido.');
+  res.json({ ran: await jobs.step(req.params.org) });
+}));
+app.get('/api/admin/quick', auth, titaOnly, wrap(async (req, res) => {
+  res.json((await q(`select o.id, o.name, o.meta->>'url' as url, o.created_at, o.expires_at,
+      (select status from jobs j where j.org_id = o.id and j.type = 'quick' order by created_at desc limit 1) as status,
+      (select error from jobs j where j.org_id = o.id and j.type = 'quick' order by created_at desc limit 1) as error
+    from orgs o where o.kind = 'quick' order by o.created_at desc limit 50`)).rows);
+}));
+
 /* ---------- Claude ---------- */
 const chatCount = new Map();
 app.post('/api/orgs/:org/ai/json', auth, orgAccess(2), wrap(async (req, res) => {
@@ -222,9 +284,9 @@ app.post('/api/orgs/:org/ai/json', auth, orgAccess(2), wrap(async (req, res) => 
   catch (e) { res.status(e.code === 'sampling_disabled' ? 503 : 502).json({ code: e.code || 'upstream_error', error: e.message }); }
 }));
 app.post('/api/orgs/:org/ai/chat', auth, orgAccess(1), wrap(async (req, res) => {
-  const k = req.user.id, now = Date.now(); const c = (chatCount.get(k) || []).filter((t) => now - t < 3600e3);
-  if (c.length >= Number(process.env.CHAT_PER_HOUR || 60)) throw fail(429, 'rate_limited', 'Límite de preguntas por hora alcanzado.');
-  c.push(now); chatCount.set(k, c);
+  const lim = req.user.guest ? Number(process.env.GUEST_CHAT_PER_HOUR || 15) : Number(process.env.CHAT_PER_HOUR || 60);
+  const used = (await q("select count(*)::int as n from ai_usage where user_id = $1 and kind = 'copilot' and at > now() - interval '1 hour'", [req.user.id])).rows[0].n;
+  if (used >= lim * 3) throw fail(429, 'rate_limited', 'Límite de preguntas por hora alcanzado. Intenta más tarde.');
   const messages = Array.isArray(req.body.messages) ? req.body.messages.slice(-40) : [];
   const tools = (Array.isArray(req.body.tools) ? req.body.tools : []).slice(0, 12).map((t) => ({ name: String(t.name).slice(0, 64), description: String(t.description || '').slice(0, 1024), input_schema: t.input_schema && typeof t.input_schema === 'object' ? t.input_schema : { type: 'object', properties: {} } }));
   if (!messages.length) throw fail(400, 'invalid', 'Sin mensajes.');

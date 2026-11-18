@@ -187,7 +187,8 @@
 
   /* ---------- espacio de una cuenta (Tita o cliente) ---------- */
   function Workspace({ me, orgId, orgInfo, onBack, refreshOrg }) {
-    const P = L.perms(me.user.role);
+    const P = { ...L.perms(me.user.role), guest: !!me.user.guest };
+    const quick = orgInfo.kind === 'quick';
     L.org = orgId;
     const ws = L.useWorkspace(orgId, { fast: P.tita });
     const jobs = L.useJobs(orgId, P.tita);
@@ -214,16 +215,19 @@
     if (ws.status === 'loading') return html`<${Center}><div className="mapact"><span className="spin"></span><span>Cargando la cuenta…</span></div><//>`;
     if (ws.status === 'error') return html`<${Center}><h2>No se pudo cargar la cuenta</h2><p className="muted">${ws.error}</p><button className="btn primary" type="button" onClick=${() => location.reload()}>Reintentar</button><//>`;
     if (ws.status === 'unpublished' || (!P.tita && !cfg.setupDone)) return html`<${Center}><div className="brandmark"><span className="logo">T</span>TITA Pricing Intelligence <b>360°</b></div><h2>Estamos preparando tu cuenta</h2><p className="muted">El equipo de Tita está importando los catálogos, definiendo las categorías y revisando la clasificación. Te avisaremos cuando el análisis esté listo.</p><button className="btn ghost" type="button" onClick=${() => L.api('POST', '/logout').then(() => location.reload())}>Cerrar sesión</button><//>`;
-    const adminBar = P.tita ? html`<div className="adminbar"><button type="button" className="btn sm ghost" onClick=${onBack}><${Icon} n="arrow" cls="flip" />Cuentas</button><b>${orgInfo.name}</b><${Badge} tone=${orgInfo.published ? 'ok' : 'warn'}>${orgInfo.published ? 'Publicada: el cliente la ve' : 'Sin publicar: el cliente no la ve'}<//>
-      ${pubAsk ? html`<span className="sm">${orgInfo.published ? '¿Ocultar la cuenta al cliente?' : '¿Publicar? El cliente verá todo el análisis.'}</span><button type="button" className="btn sm primary" onClick=${async () => { await L.api('PATCH', '/admin/orgs/' + orgId, { published: !orgInfo.published }); if (!orgInfo.published && !cfg.setupDone) await A.saveConfig(ws, { setupDone: true }); setPubAsk(false); refreshOrg(); }}>Confirmar</button><button type="button" className="btn sm ghost" onClick=${() => setPubAsk(false)}>Cancelar</button>` : html`<button type="button" className="btn sm" onClick=${() => setPubAsk(true)}>${orgInfo.published ? 'Despublicar' : 'Publicar para el cliente'}</button>`}
-      <button type="button" className="btn sm" disabled=${!Object.keys(ws.stores).length} onClick=${() => L.runJob('refresh')}>Actualizar todo ahora</button></div>` : null;
+    const tok = getTok(orgId);
+    const share = tok ? location.origin + '/?analisis=' + tok : null;
+    const guestBar = quick && !P.tita ? html`<div className="adminbar"><b>Análisis rápido de ${orgInfo.name}</b><span className="sm">Datos públicos${(ws.stores.own || {}).importedAt ? ' leídos el ' + new Date(ws.stores.own.importedAt).toLocaleDateString('es-CO') : ''} · disponible hasta el ${new Date(orgInfo.expires_at || me.org.expiresAt).toLocaleDateString('es-CO')}</span>${share ? html`<button type="button" className="btn sm" onClick=${(e) => { const b = e.currentTarget; navigator.clipboard && navigator.clipboard.writeText(share).then(() => (b.textContent = 'Link copiado'), () => (b.textContent = share)); }}>Copiar link para compartir</button>` : null}<button type="button" className="btn sm primary" onClick=${() => L.api('POST', '/logout').then(() => { location.href = '/'; })}>Analizar otra tienda</button></div>` : null;
+    const adminBar = P.tita ? html`<div className="adminbar"><button type="button" className="btn sm ghost" onClick=${onBack}><${Icon} n="arrow" cls="flip" />Cuentas</button><b>${orgInfo.name}</b>${quick ? html`<${Badge} tone="info">Análisis rápido · ${orgInfo.url || ''}<//>` : html`<${Badge} tone=${orgInfo.published ? 'ok' : 'warn'}>${orgInfo.published ? 'Publicada: el cliente la ve' : 'Sin publicar: el cliente no la ve'}<//>`}
+      ${quick ? null : pubAsk ? html`<span className="sm">${orgInfo.published ? '¿Ocultar la cuenta al cliente?' : '¿Publicar? El cliente verá todo el análisis.'}</span><button type="button" className="btn sm primary" onClick=${async () => { await L.api('PATCH', '/admin/orgs/' + orgId, { published: !orgInfo.published }); if (!orgInfo.published && !cfg.setupDone) await A.saveConfig(ws, { setupDone: true }); setPubAsk(false); refreshOrg(); }}>Confirmar</button><button type="button" className="btn sm ghost" onClick=${() => setPubAsk(false)}>Cancelar</button>` : html`<button type="button" className="btn sm" onClick=${() => setPubAsk(true)}>${orgInfo.published ? 'Despublicar' : 'Publicar para el cliente'}</button>`}
+      <button type="button" className="btn sm" disabled=${!Object.keys(ws.stores).length} onClick=${() => L.runJob('refresh')}>Actualizar todo ahora</button></div>` : guestBar;
     if (P.tita && !cfg.setupDone) return html`<div>${adminBar}<${A.Setup} ws=${ws} ro=${false} jobs=${jobs} orgName=${orgInfo.name} /><${Toasts} /></div>`;
     if (!E || !D) return html`<div>${adminBar}<${Center}><h2>Sin categorías todavía</h2><p className="muted">${P.tita ? 'Define las categorías en Catálogo y clasificación.' : 'La cuenta aún no tiene categorías.'}</p>${P.tita ? html`<button className="btn primary" type="button" onClick=${() => A.saveConfig(ws, { setupDone: false, step: 3 })}>Ir a categorías</button>` : null}<//><${Toasts} /></div>`;
 
     const cat = E.cats.some((c) => c.id === fRaw.cat) ? fRaw.cat : E.cats[0] && E.cats[0].id;
     const f = { ...fRaw, cat, brands: E.cfg.comps.filter((b) => !fRaw.off.includes(b)) };
     const setF = (n) => setFRaw({ ...n, off: E.cfg.comps.filter((b) => !n.brands.includes(b)), brands: undefined });
-    const allowed = (r) => (['data', 'config', 'usuarios'].includes(r) ? P.tita : r === 'privados' ? P.priv && !P.tita : true);
+    const allowed = (r) => (['data', 'config', 'usuarios'].includes(r) ? P.tita : r === 'privados' ? P.priv && !P.tita : P.guest ? ['overview', 'market', 'advisor', 'launch'].includes(r) : true);
     const go = (r, o = {}) => {
       if (!ROUTES.includes(r) || !allowed(r)) r = 'overview';
       const n = { ...fRaw };
@@ -262,7 +266,9 @@
       case 'privados': view = html`<div className="page"><header className="ph"><div><div className="eyebrow">Datos privados</div><h1>Costos y ventas</h1><p>Solo los ven los administradores de tu cuenta y el equipo de Tita.</p></div></header><${A.PrivateImport} ws=${ws} ro=${!P.priv} /></div>`; break;
       default: view = html`<${A.Overview} ...${common} />`;
     }
-    const NAV = [
+    const NAV = P.guest ? [
+      ['Análisis', [['overview', 'Overview', 'overview'], ['market', 'Market Intelligence', 'market'], ['advisor', 'Price Advisor', 'advisor'], ['launch', 'Product Launch', 'launch']]],
+    ] : [
       ['Inteligencia', [['overview', 'Overview', 'overview'], ['market', 'Market Intelligence', 'market'], ['advisor', 'Price Advisor', 'advisor']]],
       ['Decisiones', [['launch', 'Product Launch', 'launch'], ['promo', 'Promotion Optimizer', 'promo']]],
       ['Validación y aprendizaje', [['pulse', 'Pulse WTP', 'pulse'], ['learning', 'Revenue Learning', 'learning']]],
@@ -273,7 +279,7 @@
       <aside className=${'side ' + (navOpen ? 'open' : '')}>
         <div className="brandmark"><span className="logo">T</span><div><b>TITA Pricing</b><small>Intelligence 360°</small></div></div>
         <nav aria-label="Módulos">${NAV.map(([g, items]) => html`<div key=${g} className="ng"><span>${g}</span>${items.map(navItem)}</div>`)}</nav>
-        <div className="sidefoot"><div className="tenant"><span className="muted">Cuenta</span><b>${orgInfo.name}</b><small>${me.user.name} · ${ROLE[me.user.role]}</small><button type="button" className="linkbtn side-link" onClick=${() => L.api('POST', '/logout').then(() => location.reload())}>Cerrar sesión</button></div></div>
+        <div className="sidefoot"><div className="tenant"><span className="muted">Cuenta</span><b>${orgInfo.name}</b><small>${P.guest ? 'Análisis rápido · solo lectura' : me.user.name + ' · ' + ROLE[me.user.role]}</small><button type="button" className="linkbtn side-link" onClick=${() => L.api('POST', '/logout').then(() => { location.href = '/'; })}>${P.guest ? 'Salir' : 'Cerrar sesión'}</button></div></div>
       </aside>
       ${navOpen ? html`<div className="scrim" onClick=${() => setNavOpen(false)}></div>` : null}
       <div className="main">
@@ -297,7 +303,10 @@
     const [team, setTeam] = useState(null);
     const [tf, setTf] = useState({ name: '', email: '' });
     const [msg, setMsg] = useState(null);
-    const load = () => { L.api('GET', '/admin/orgs').then(setOrgs).catch((e) => L.toast(e.message, 'bad')); L.api('GET', '/admin/team').then(setTeam).catch(() => {}); };
+    const [quick, setQuick] = useState(null);
+    const [qurl, setQurl] = useState('');
+    const load = () => { L.api('GET', '/admin/orgs').then(setOrgs).catch((e) => L.toast(e.message, 'bad')); L.api('GET', '/admin/team').then(setTeam).catch(() => {}); L.api('GET', '/admin/quick').then(setQuick).catch(() => {}); };
+    const runQuick = async (e) => { e.preventDefault(); try { const r = await L.api('POST', '/quick', { url: qurl }); saveTok(r.org, r.token); setQurl(''); open(r.org); } catch (x) { L.toast(x.message, 'bad'); } };
     useEffect(() => { load(); }, []);
     const create = async (e) => { e.preventDefault(); try { const r = await L.api('POST', '/admin/orgs', { name }); setName(''); open(r.id); } catch (x) { L.toast(x.message, 'bad'); } };
     const addTeam = async (e) => { e.preventDefault(); try { const r = await L.api('POST', '/admin/team', tf); setMsg({ email: tf.email, pw: r.tempPassword }); setTf({ name: '', email: '' }); load(); } catch (x) { L.toast(x.message, 'bad'); } };
@@ -308,11 +317,65 @@
         <header className="ph"><div><div className="eyebrow">Cuentas de clientes</div><h1>¿Qué cuentas administra Tita?</h1><p>Cada cuenta tiene su tienda, sus competidores, sus categorías y sus usuarios. El cliente solo ve su cuenta, y solo cuando la publicas.</p></div>
           <form className="newacct" onSubmit=${create}><label className="fld" htmlFor="no-n"><span>Nueva cuenta</span><input id="no-n" placeholder="Nombre del cliente" value=${name} onInput=${(e) => setName(e.target.value)} /></label><button className="btn primary" type="submit" disabled=${!name.trim()}>Crear y configurar</button></form></header>
         <section className="panel">${!orgs ? html`<span className="spin"></span>` : orgs.length ? html`<div className="tw"><table className="tbl"><thead><tr><th>Cliente</th><th>Estado</th><th className="num">Tiendas</th><th className="num">Productos</th><th className="num">Usuarios</th><th>Última actividad</th><th></th></tr></thead><tbody>${orgs.map((o) => html`<tr key=${o.id} className="click" onClick=${() => open(o.id)}><td><b>${o.name}</b><small>${o.id}</small></td><td><${Badge} tone=${o.published ? 'ok' : 'warn'}>${o.published ? 'Publicada' : 'En configuración'}<//>${o.last_job === 'running' || o.last_job === 'queued' ? html` <${Badge} tone="info">trabajo en curso<//>` : o.last_job === 'failed' ? html` <${Badge} tone="down">último trabajo falló<//>` : null}</td><td className="num">${o.stores}</td><td className="num">${o.products}</td><td className="num">${o.users}</td><td>${o.updated_at ? new Date(o.updated_at).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</td><td><button type="button" className="btn sm">Abrir</button></td></tr>`)}</tbody></table></div>` : html`<${Empty} icon="store" title="Aún no hay cuentas">Crea la primera cuenta con el nombre del cliente.<//>`}</section>
+        <section className="panel"><div className="row-between"><div><h2>Análisis rápidos</h2><p className="muted">Pega el link de cualquier tienda para un análisis sin configurar (por ejemplo, antes de una reunión con un prospecto). Duran 7 días. Los que inician visitantes desde la página pública también aparecen aquí.</p></div>
+          <form className="newacct" onSubmit=${runQuick}><input aria-label="Link de la tienda" placeholder="https://tienda.com" value=${qurl} onInput=${(e) => setQurl(e.target.value)} /><button className="btn primary" type="submit" disabled=${!qurl.trim()}>Analizar</button></form></div>
+          ${quick && quick.length ? html`<div className="tw"><table className="tbl"><thead><tr><th>Tienda</th><th>Estado</th><th>Creado</th><th>Vence</th><th></th></tr></thead><tbody>${quick.map((o) => html`<tr key=${o.id} className="click" onClick=${() => open(o.id)}><td><b>${o.name}</b><small>${o.url}</small></td><td><${Badge} tone=${o.status === 'done' ? 'ok' : o.status === 'failed' ? 'down' : 'info'}>${{ done: 'listo', failed: 'falló', queued: 'en cola', running: 'en curso' }[o.status] || '—'}<//>${o.error ? html`<small>${o.error.slice(0, 90)}</small>` : null}</td><td>${new Date(o.created_at).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}</td><td>${new Date(o.expires_at).toLocaleDateString('es-CO')}</td><td><button type="button" className="btn sm">Abrir</button></td></tr>`)}</tbody></table></div>` : html`<p className="muted sm">Aún no hay análisis rápidos.</p>`}</section>
         <section className="panel"><h2>Equipo Tita</h2><p className="muted">Administradores con acceso a todas las cuentas.</p>
           ${msg ? html`<${Note}>Contraseña temporal de <b>${msg.email}</b>: <span className="mono sel">${msg.pw}</span>. Envíala por un canal seguro.<//>` : null}
           ${team ? html`<ul className="plain">${team.map((t) => html`<li key=${t.id}>${t.name} · ${t.email}</li>`)}</ul>` : null}
           <form className="mapact" onSubmit=${addTeam}><input aria-label="Nombre" placeholder="Nombre" value=${tf.name} onInput=${(e) => setTf({ ...tf, name: e.target.value })} /><input aria-label="Correo" type="email" placeholder="correo@titamedia.com" value=${tf.email} onInput=${(e) => setTf({ ...tf, email: e.target.value })} /><button className="btn sm" type="submit">Agregar administrador</button></form></section>
       </div><${Toasts} /></div>`;
+  }
+
+  /* ---------- análisis rápido desde un link ---------- */
+  const tokKey = (org) => 'tita-quick-' + org;
+  const saveTok = (org, t) => { try { localStorage.setItem(tokKey(org), t); } catch (e) { /* sin almacenamiento */ } };
+  const getTok = (org) => { try { return localStorage.getItem(tokKey(org)); } catch (e) { return null; } };
+  function QuickLanding({ onStarted, onLogin }) {
+    const [url, setUrl] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
+    const go = async (e) => {
+      e.preventDefault(); setBusy(true); setErr('');
+      try { const r = await L.api('POST', '/quick', { url }); saveTok(r.org, r.token); onStarted(r.org); }
+      catch (x) { setErr(x.message); setBusy(false); }
+    };
+    return html`<div className="ob"><div className="ob-in">
+      <div className="row-between"><div className="brandmark"><span className="logo">T</span>TITA Pricing Intelligence <b>360°</b></div><button type="button" className="linkbtn sm" onClick=${onLogin}>Ingreso equipo Tita</button></div>
+      <h1>Descubre oportunidades de rentabilidad en tu catálogo.</h1>
+      <p className="lead">Pega el link de una tienda online. Leemos su catálogo público, Claude encuentra a sus competidores, entiende los productos y te mostramos dónde está caro, dónde está barato y qué espacios del mercado no está cubriendo.</p>
+      <form className="urlform" onSubmit=${go}>
+        <label htmlFor="q-url">Dirección de la tienda</label>
+        <div className="urlrow"><${Icon} n="store" /><input id="q-url" type="text" inputMode="url" autoComplete="url" placeholder="https://mitienda.com" value=${url} onInput=${(e) => setUrl(e.target.value)} /><button className="btn primary" type="submit" disabled=${busy || !url.trim()}>${busy ? 'Preparando…' : 'Analizar'}<${Icon} n="arrow" /></button></div>
+        ${err ? html`<div className="err" role="alert">${err}</div>` : null}
+        <div className="hint">Funciona con tiendas Shopify, WooCommerce o VTEX que publican su catálogo. El análisis toma entre 5 y 10 minutos y queda disponible 7 días.</div>
+      </form>
+      <ul className="checks"><li className="ok"><${Icon} n="check" s=${14} />Solo usamos información pública de las tiendas: productos, precios y fichas.</li><li className="ok"><${Icon} n="check" s=${14} />Sin registro ni configuración.</li></ul>
+    </div></div>`;
+  }
+  const PHASES = [['own', 'Leyendo el catálogo de la tienda'], ['discover', 'Buscando competidores en la web'], ['comps', 'Leyendo el catálogo de los competidores'], ['cats', 'Proponiendo categorías y atributos'], ['classify', 'Clasificando productos con Claude'], ['done', 'Construyendo el análisis']];
+  function QuickGate({ org, me, children, onReset }) {
+    const [st, setSt] = useState(undefined);
+    useEffect(() => {
+      let alive = true, timer = null, pumping = false;
+      const pull = async () => {
+        let s = null; try { s = await L.api('GET', '/quick/' + org + '/status'); } catch (e) { s = { status: 'failed', error: e.message }; }
+        if (!alive) return; setSt(s);
+        const live = s && (s.status === 'queued' || s.status === 'running');
+        if (live && !pumping) { pumping = true; L.api('POST', '/quick/' + org + '/pump').catch(() => {}).finally(() => { pumping = false; }); }
+        if (live) timer = setTimeout(pull, 3000);
+      };
+      pull();
+      return () => { alive = false; clearTimeout(timer); };
+    }, [org]);
+    if (st === undefined) return html`<${Center}><span className="spin"></span><//>`;
+    if (st && st.status === 'done') return children;
+    const p = (st && st.progress) || {};
+    const cur = PHASES.findIndex((x) => x[0] === (p.phase || 'own'));
+    const detail = { own: p.own != null ? p.own + ' productos tomados para el análisis' + (p.ownTotal > p.own ? ' (de ' + p.ownTotal + ' publicados)' : '') + (p.platform ? ' · ' + p.platform : '') : '', discover: p.candidates ? p.candidates.length + ' candidatos: ' + p.candidates.map((c) => c.name).join(', ') : '', comps: p.found ? p.found.map((f) => f.name + ' (' + f.n + ')').join(', ') || 'Probando tiendas…' : '', cats: p.cats ? p.cats.join(', ') : '', classify: p.classified != null ? p.classified + ' clasificados · ' + (p.left || 0) + ' en cola' : '' };
+    return html`<div className="ob"><div className="ob-in wide">
+      <div className="brandmark"><span className="logo">T</span>TITA Pricing Intelligence <b>360°</b></div>
+      <div className="ob-head"><h2>${st && st.status === 'failed' ? 'No pudimos completar el análisis' : 'Analizando ' + (me.org ? me.org.name : 'la tienda') + '…'}</h2><span className="muted sm">Puedes dejar esta pestaña abierta; el análisis avanza mientras la ves.</span></div>
+      ${st && st.status === 'failed' ? html`<div><${Note} tone="warn">${st.error}<//><div className="ob-actions"><button className="btn primary" type="button" onClick=${onReset}>Analizar otra tienda</button></div></div>` : html`<div className="proc">${PHASES.map(([k, t], i) => html`<div key=${k} className=${'procrow ' + (i < cur ? 'done' : i === cur ? 'run' : '')}><span className="st">${i < cur ? html`<${Icon} n="check" s=${12} />` : ''}</span><b>${t}</b><span className="res">${detail[k] || ''}</span></div>`)}</div>`}
+    </div></div>`;
   }
 
   /* ---------- acceso ---------- */
@@ -331,20 +394,28 @@
     const [me, setMe] = useState(undefined);
     const [orgId, setOrgId] = useState(() => { try { return sessionStorage.getItem('tita-org'); } catch (e) { return null; } });
     const [orgInfo, setOrgInfo] = useState(null);
+    const [showLogin, setShowLogin] = useState(false);
     const loadMe = () => L.api('GET', '/me').then((m) => { L.uid = m.user.id; L.role = m.user.role; setMe(m); }).catch(() => setMe(null));
-    useEffect(() => { L.onUnauth = () => setMe(null); loadMe(); }, []);
+    useEffect(() => {
+      L.onUnauth = () => setMe(null);
+      const t = new URLSearchParams(location.search).get('analisis');
+      if (t) { L.api('POST', '/quick/open', { token: t }).then((r) => { saveTok(r.org, t); }).catch((e) => L.toast(e.message, 'bad')).finally(() => { history.replaceState(null, '', '/'); loadMe(); }); }
+      else loadMe();
+    }, []);
     const target = me && me.user.role !== 'tita_admin' ? me.org && me.org.id : orgId;
     const loadOrg = () => target && L.api('GET', '/orgs/' + target).then(setOrgInfo).catch(() => { setOrgId(null); });
     useEffect(() => { setOrgInfo(null); loadOrg(); }, [target]);
     const open = (id) => { try { sessionStorage.setItem('tita-org', id); } catch (e) { /* sin almacenamiento */ } location.hash = 'overview'; setOrgId(id); };
     const back = () => { try { sessionStorage.removeItem('tita-org'); } catch (e) { /* sin almacenamiento */ } location.hash = ''; setOrgId(null); };
     if (me === undefined) return html`<${Center}><span className="spin"></span><//>`;
-    if (me === null) return html`<${Login} onDone=${loadMe} />`;
+    if (me === null) return showLogin ? html`<div><${Login} onDone=${loadMe} /><div className="ob-actions center"><button type="button" className="linkbtn" onClick=${() => setShowLogin(false)}>Volver al análisis rápido</button></div></div>` : html`<div><${QuickLanding} onStarted=${loadMe} onLogin=${() => setShowLogin(true)} /><${Toasts} /></div>`;
     if (me.user.mustChange) return html`<${ChangePassword} onDone=${loadMe} />`;
     if (me.user.role === 'tita_admin' && !orgId) return html`<${AdminHome} me=${me} open=${open} />`;
     if (!target) return html`<${Center}><h2>Tu usuario no tiene una cuenta asignada</h2><p className="muted">Pide acceso a tu contacto en Tita Media.</p><//>`;
     if (!orgInfo) return html`<${Center}><span className="spin"></span><//>`;
-    return html`<${Workspace} key=${target} me=${me} orgId=${target} orgInfo=${orgInfo} onBack=${back} refreshOrg=${loadOrg} />`;
+    const ws = html`<${Workspace} key=${target} me=${me} orgId=${target} orgInfo=${orgInfo} onBack=${back} refreshOrg=${loadOrg} />`;
+    if (orgInfo.kind === 'quick') return html`<${QuickGate} key=${'g' + target} org=${target} me=${me} onReset=${() => (me.user.guest ? L.api('POST', '/logout').then(() => { location.href = '/'; }) : back())}>${ws}<//>`;
+    return ws;
   }
 
   class Boundary extends React.Component {

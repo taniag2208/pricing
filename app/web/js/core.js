@@ -127,7 +127,7 @@
           <p className="foot">Brecha = precio actual frente al precio estimado por atributos. No es disposición a pagar ni precio óptimo: es lo que cobra el mercado por atributos similares.</p>
         </section>
         <section className="panel"><div className="ptitle"><h2>Alertas</h2></div>
-          <ul className="alerts">${alerts.map((a, i) => html`<li key=${i} className=${'al-' + a.tone}><${Icon} n=${a.tone === 'warn' ? 'alert' : 'info'} /><div><b>${a.t}</b><p>${a.d}</p><button className="linkbtn" type="button" onClick=${a.a}>${a.al}</button></div></li>`)}</ul></section>
+          ${alerts.length ? null : html`<p className="muted sm">Sin alertas por ahora.</p>`}<ul className="alerts">${alerts.map((a, i) => html`<li key=${i} className=${'al-' + a.tone}><${Icon} n=${a.tone === 'warn' ? 'alert' : 'info'} /><div><b>${a.t}</b><p>${a.d}</p><button className="linkbtn" type="button" onClick=${a.a}>${a.al}</button></div></li>`)}</ul></section>
       </div>
       <section className="panel"><div className="ptitle"><h2>Estado por categoría</h2></div>
         <div className="tw"><table className="tbl"><thead><tr><th>Categoría</th><th className="num">Tus productos</th><th className="num">Comparables</th><th>Modelo</th><th className="num">Índice vs. mercado</th><th className="num">Debajo</th><th className="num">Encima</th><th></th></tr></thead><tbody>
