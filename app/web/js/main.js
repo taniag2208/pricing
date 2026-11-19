@@ -33,7 +33,7 @@
       case 'cats': {
         const r = E.cats.map((c) => { const below = E.diag[c.id].filter((d) => d.pos === 'below').length; const ws = TP.whiteSpaces(c, E.own[c.id], E.pool[c.id], E.band[c.id], 'typ', E.model[c.id]).filter((x) => x.gap).length; return { c, below, ws, idx: A.indexVsMarket(E, c.id), s: below * 2 + ws }; }).sort((a, b) => b.s - a.s);
         const t = r[0];
-        return { text: html`<p>La mayor oportunidad está en <b>${t.c.name}</b>: ${t.below} productos por debajo de su banda y ${t.ws} espacios competitivos con poca oferta propia (índice de precio ${Math.round(t.idx * 100)} frente a 100 del mercado).</p><ul className="cp-list">${r.map((x) => html`<li key=${x.c.id}><span><b>${x.c.name}</b> · ${x.below} por debajo · ${x.ws} espacios · índice ${isFinite(x.idx) ? Math.round(x.idx * 100) : '—'}</span></li>`)}</ul>`, action: { l: 'Abrir ' + t.c.name + ' en Price Advisor', fn: () => actions.go('advisor', { cat: t.c.id, pos: 'below', sub: 'diagnostico' }) }, basis: 'Puntaje = 2 × productos por debajo de su banda + espacios competitivos. ' + basis(t.c), conf: 'Media' };
+        return { text: html`<p>La mayor oportunidad está en <b>${t.c.name}</b>: ${t.below} productos por debajo de su banda y ${t.ws} espacios competitivos con poca oferta propia (índice de precio ${Math.round(t.idx * 100)} frente a 100 del mercado).</p><ul className="cp-list">${r.map((x) => html`<li key=${x.c.id}><span><b>${x.c.name}</b> · ${x.below} por debajo · ${x.ws} espacios · índice ${isFinite(x.idx) ? Math.round(x.idx * 100) : '—'}</span></li>`)}</ul>`, action: { l: 'Abrir ' + t.c.name + ' en Pricing Advisor', fn: () => actions.go('advisor', { cat: t.c.id, pos: 'below', sub: 'diagnostico' }) }, basis: 'Puntaje = 2 × productos por debajo de su banda + espacios competitivos. ' + basis(t.c), conf: 'Media' };
       }
       case 'compare': {
         const st = A.brandStats(E, { ...f, cat: cat.id, mat: 'all', typ: 'all', brands: E.cfg.comps, priceType: 'list' }, cat.id);
@@ -66,7 +66,7 @@
         let out = 0, inb = 0, franja = 0, tot = 0, under = 0;
         scope.forEach((c) => E.diag[c.id].forEach((d) => { tot++; const np = d.p.list * (1 + x); if (d.hi && d.p.list <= d.hi && np > d.hi) out++; if (d.lo && d.p.list < d.lo && np >= d.lo) inb++; if (TP.bandOf(np, E.band[c.id]) !== TP.bandOf(d.p.list, E.band[c.id])) franja++; if (d.lo && np < d.lo) under++; }));
         const idx = TP.median(scope.map((c) => A.indexVsMarket(E, c.id) * (1 + x)));
-        return { text: html`<p>Con un incremento uniforme de <b>${Math.round(x * 100)} %</b>${catId ? ' en ' + scope[0].name.toLowerCase() : ''}:</p><ul className="cp-list"><li><span><b>${inb}</b> productos que hoy están por debajo entrarían a su banda de mercado.</span></li><li><span><b>${out}</b> productos quedarían por encima de su banda.</span></li><li><span><b>${franja}</b> de ${tot} cambiarían de franja.</span></li><li><span>Índice de precio frente al mercado: ${isFinite(idx) ? Math.round(idx * 100) : '—'}.</span></li></ul><p className="muted sm">${E.hasUnits ? 'Para el efecto en unidades y margen usa Promotion Optimizer con un supuesto de elasticidad o la elasticidad medida.' : 'Sin datos de ventas no estimo el efecto en volumen ni en margen.'} Un incremento uniforme ignora que cada producto tiene una brecha distinta: el Price Advisor propone cambios por producto.</p>`, action: { l: 'Ir al Price Advisor', fn: () => actions.go('advisor', { sub: 'diagnostico' }) }, basis: 'Bandas P10–P90 de los modelos actuales; sin efecto de demanda.', conf: 'Media' };
+        return { text: html`<p>Con un incremento uniforme de <b>${Math.round(x * 100)} %</b>${catId ? ' en ' + scope[0].name.toLowerCase() : ''}:</p><ul className="cp-list"><li><span><b>${inb}</b> productos que hoy están por debajo entrarían a su banda de mercado.</span></li><li><span><b>${out}</b> productos quedarían por encima de su banda.</span></li><li><span><b>${franja}</b> de ${tot} cambiarían de franja.</span></li><li><span>Índice de precio frente al mercado: ${isFinite(idx) ? Math.round(idx * 100) : '—'}.</span></li></ul><p className="muted sm">${E.hasUnits ? 'Para el efecto en unidades y margen usa Simulador de promociones con un supuesto de elasticidad o la elasticidad medida.' : 'Sin datos de ventas no estimo el efecto en volumen ni en margen.'} Un incremento uniforme ignora que cada producto tiene una brecha distinta: el Pricing Advisor propone cambios por producto.</p>`, action: { l: 'Ir al Pricing Advisor', fn: () => actions.go('advisor', { sub: 'diagnostico' }) }, basis: 'Bandas P10–P90 de los modelos actuales; sin efecto de demanda.', conf: 'Media' };
       }
       case 'validate': {
         const recs = A.pulseRecs(E, []);
@@ -214,7 +214,7 @@
 
     if (ws.status === 'loading') return html`<${Center}><div className="mapact"><span className="spin"></span><span>Cargando la cuenta…</span></div><//>`;
     if (ws.status === 'error') return html`<${Center}><h2>No se pudo cargar la cuenta</h2><p className="muted">${ws.error}</p><button className="btn primary" type="button" onClick=${() => location.reload()}>Reintentar</button><//>`;
-    if (ws.status === 'unpublished' || (!P.tita && !cfg.setupDone)) return html`<${Center}><div className="brandmark"><span className="logo">T</span>TITA Pricing Intelligence <b>360°</b></div><h2>Estamos preparando tu cuenta</h2><p className="muted">El equipo de Tita está importando los catálogos, definiendo las categorías y revisando la clasificación. Te avisaremos cuando el análisis esté listo.</p><button className="btn ghost" type="button" onClick=${() => L.api('POST', '/logout').then(() => location.reload())}>Cerrar sesión</button><//>`;
+    if (ws.status === 'unpublished' || (!P.tita && !cfg.setupDone)) return html`<${Center}><div className="brand"><img src="/brand/tita-mark.svg" alt="" width="26" height="26" /><span className="wm">TITA MEDIA</span><span className="prod">Pricing Intelligence 360°</span></div><h2>Estamos preparando tu cuenta</h2><p className="muted">El equipo de Tita está importando los catálogos, definiendo las categorías y revisando la clasificación. Te avisaremos cuando el análisis esté listo.</p><button className="btn ghost" type="button" onClick=${() => L.api('POST', '/logout').then(() => location.reload())}>Cerrar sesión</button><//>`;
     const tok = getTok(orgId);
     const share = tok ? location.origin + '/?analisis=' + tok : null;
     const guestBar = quick && !P.tita ? html`<div className="adminbar"><b>Análisis rápido de ${orgInfo.name}</b><span className="sm">Datos públicos${(ws.stores.own || {}).importedAt ? ' leídos el ' + new Date(ws.stores.own.importedAt).toLocaleDateString('es-CO') : ''} · disponible hasta el ${new Date(orgInfo.expires_at || me.org.expiresAt).toLocaleDateString('es-CO')}</span>${share ? html`<button type="button" className="btn sm" onClick=${(e) => { const b = e.currentTarget; navigator.clipboard && navigator.clipboard.writeText(share).then(() => (b.textContent = 'Link copiado'), () => (b.textContent = share)); }}>Copiar link para compartir</button>` : null}<button type="button" className="btn sm primary" onClick=${() => L.api('POST', '/logout').then(() => { location.href = '/'; })}>Analizar otra tienda</button></div>` : null;
@@ -267,17 +267,17 @@
       default: view = html`<${A.Overview} ...${common} />`;
     }
     const NAV = P.guest ? [
-      ['Análisis', [['overview', 'Overview', 'overview'], ['market', 'Market Intelligence', 'market'], ['advisor', 'Price Advisor', 'advisor'], ['launch', 'Product Launch', 'launch']]],
+      ['Análisis', [['overview', 'Overview', 'overview'], ['market', 'Market Intelligence', 'market'], ['advisor', 'Pricing Advisor', 'advisor'], ['launch', 'Simulador de lanzamiento', 'launch']]],
     ] : [
-      ['Inteligencia', [['overview', 'Overview', 'overview'], ['market', 'Market Intelligence', 'market'], ['advisor', 'Price Advisor', 'advisor']]],
-      ['Decisiones', [['launch', 'Product Launch', 'launch'], ['promo', 'Promotion Optimizer', 'promo']]],
+      ['Inteligencia', [['overview', 'Overview', 'overview'], ['market', 'Market Intelligence', 'market'], ['advisor', 'Pricing Advisor', 'advisor']]],
+      ['Simulador', [['launch', 'Lanzamiento de producto', 'launch'], ['promo', 'Promociones y margen', 'promo']]],
       ['Validación y aprendizaje', [['pulse', 'Pulse WTP', 'pulse'], ['learning', 'Revenue Learning', 'learning']]],
       ...(P.tita ? [['Administración Tita', [['data', 'Catálogo y clasificación', 'store'], ['config', 'Configuración', 'config'], ['usuarios', 'Usuarios', 'lock']]]] : P.priv ? [['Datos', [['privados', 'Costos y ventas', 'upload']]]] : []),
     ];
     const navItem = ([k, l, ic]) => html`<a key=${k} href=${'#' + k} className=${rt === k ? 'on' : ''} aria-current=${rt === k ? 'page' : undefined} onClick=${(e) => { e.preventDefault(); go(k); }}><${Icon} n=${ic} />${l}${k === 'market' && E.pendingMaps && P.tita ? html`<span className="cnt">${E.pendingMaps}</span>` : null}${k === 'advisor' && pend ? html`<span className="cnt">${pend}</span>` : null}${k === 'data' && D.pending ? html`<span className="cnt" title="Productos sin clasificar">${D.pending > 999 ? '999+' : D.pending}</span>` : null}</a>`;
     return html`<div className=${'shell ' + (cpOpen ? 'cp-on' : '')}>
       <aside className=${'side ' + (navOpen ? 'open' : '')}>
-        <div className="brandmark"><span className="logo">T</span><div><b>TITA Pricing</b><small>Intelligence 360°</small></div></div>
+        <div className="brandmark side-brand"><img className="mark" src="/brand/tita-mark.svg" alt="" width="28" height="28" /><div><b className="wm">TITA MEDIA</b><small>Pricing Intelligence 360°</small></div></div>
         <nav aria-label="Módulos">${NAV.map(([g, items]) => html`<div key=${g} className="ng"><span>${g}</span>${items.map(navItem)}</div>`)}</nav>
         <div className="sidefoot"><div className="tenant"><span className="muted">Cuenta</span><b>${orgInfo.name}</b><small>${P.guest ? 'Análisis rápido · solo lectura' : me.user.name + ' · ' + ROLE[me.user.role]}</small><button type="button" className="linkbtn side-link" onClick=${() => L.api('POST', '/logout').then(() => { location.href = '/'; })}>${P.guest ? 'Salir' : 'Cerrar sesión'}</button></div></div>
       </aside>
@@ -325,7 +325,7 @@
     useEffect(() => { load(); }, []);
     const create = async (e) => { e.preventDefault(); try { const r = await L.api('POST', '/admin/orgs', { name }); setName(''); open(r.id); } catch (x) { L.toast(x.message, 'bad'); } };
     const addTeam = async (e) => { e.preventDefault(); try { const r = await L.api('POST', '/admin/team', tf); setMsg({ email: tf.email, pw: r.tempPassword }); setTf({ name: '', email: '' }); load(); } catch (x) { L.toast(x.message, 'bad'); } };
-    return html`<div className="adminhome"><header className="top"><div className="topctx"><span className="logo">T</span><b>Consola Tita · Pricing Intelligence 360°</b></div><span className="sm muted">${me.user.name}</span><button type="button" className="btn sm ghost" onClick=${() => L.api('POST', '/logout').then(() => location.reload())}>Cerrar sesión</button></header>
+    return html`<div className="adminhome"><header className="top"><div className="topctx"><img src="/brand/tita-mark.svg" alt="" width="26" height="26" /><b>Consola Tita</b><span className="muted sm">Pricing Intelligence 360°</span></div><span className="sm muted">${me.user.name}</span><button type="button" className="btn sm ghost" onClick=${() => L.api('POST', '/logout').then(() => location.reload())}>Cerrar sesión</button></header>
       <div className="page">
         ${!me.ai ? html`<${Note} tone="warn">La IA no está disponible en el servidor: la importación automática funciona, pero no se pueden proponer categorías, clasificar ni usar el copiloto.<//>` : null}
         ${me.user.mustChange ? null : null}
@@ -343,112 +343,14 @@
       </div><${Toasts} /></div>`;
   }
 
-  /* ---------- análisis rápido desde un link ---------- */
-  const tokKey = (org) => 'tita-quick-' + org;
-  const saveTok = (org, t) => { try { localStorage.setItem(tokKey(org), t); } catch (e) { /* sin almacenamiento */ } };
-  const getTok = (org) => { try { return localStorage.getItem(tokKey(org)); } catch (e) { return null; } };
-  function QuickLanding({ onStarted, onLogin }) {
-    const [url, setUrl] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
-    const go = async (e) => {
-      e.preventDefault(); setBusy(true); setErr('');
-      try { const r = await L.api('POST', '/quick', { url }); saveTok(r.org, r.token); onStarted(r.org); }
-      catch (x) { setErr(x.message); setBusy(false); }
-    };
-    return html`<div className="ob"><div className="ob-in">
-      <div className="row-between"><div className="brandmark"><span className="logo">T</span>TITA Pricing Intelligence <b>360°</b></div><button type="button" className="linkbtn sm" onClick=${onLogin}>Ingreso equipo Tita</button></div>
-      <h1>Descubre oportunidades de rentabilidad en tu catálogo.</h1>
-      <p className="lead">Pega el link de una tienda online. Leemos su catálogo público, la IA encuentra a sus competidores, entiende los productos y te mostramos dónde está caro, dónde está barato y qué espacios del mercado no está cubriendo.</p>
-      <form className="urlform" onSubmit=${go}>
-        <label htmlFor="q-url">Dirección de la tienda</label>
-        <div className="urlrow"><${Icon} n="store" /><input id="q-url" type="text" inputMode="url" autoComplete="url" placeholder="https://mitienda.com" value=${url} onInput=${(e) => setUrl(e.target.value)} /><button className="btn primary" type="submit" disabled=${busy || !url.trim()}>${busy ? 'Preparando…' : 'Analizar'}<${Icon} n="arrow" /></button></div>
-        ${err ? html`<div className="err" role="alert">${err}</div>` : null}
-        <div className="hint">Funciona con tiendas Shopify, WooCommerce o VTEX que publican su catálogo. El análisis toma entre 5 y 10 minutos y queda disponible 7 días.</div>
-      </form>
-      <ul className="checks"><li className="ok"><${Icon} n="check" s=${14} />Solo usamos información pública de las tiendas: productos, precios y fichas.</li><li className="ok"><${Icon} n="check" s=${14} />Sin registro ni configuración.</li></ul>
-    </div></div>`;
-  }
-  const PHASES = [['own', 'Leyendo el catálogo de la tienda'], ['discover', 'Buscando competidores en la web'], ['comps', 'Leyendo el catálogo de los competidores'], ['cats', 'Proponiendo categorías y atributos'], ['classify', 'Clasificando productos con IA'], ['done', 'Construyendo el análisis']];
-  const hostName = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return u; } };
-  function CompsAsk({ org, p, onReset, onSent }) {
-    const confirm = p.phase === 'confirm_comps';
-    const cands = confirm ? p.candidates || [] : [];
-    const [sel, setSel] = useState(() => new Set(cands.map((c) => c.url)));
-    const [txt, setTxt] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
-    const extra = txt.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
-    const urls = [...cands.filter((c) => sel.has(c.url)).map((c) => c.url), ...extra];
-    const toggle = (u) => setSel((x) => { const n = new Set(x); n.has(u) ? n.delete(u) : n.add(u); return n; });
-    const send = async (e) => { e.preventDefault(); setBusy(true); setErr(''); try { await L.api('POST', '/quick/' + org + '/comps', { urls }); onSent(); } catch (x) { setErr(x.message); setBusy(false); } };
-    const tried = (p.tried || []).map(hostName);
-    const rej = p.rejected || [];
-    return html`<form className="urlform" onSubmit=${send}>
-      ${confirm ? html`<p>Encontramos estas tiendas que venden lo mismo que ${p.storeName || 'la tienda'}. Desmarca las que no sean competencia directa y agrega las que falten.</p>
-        <ul className="checks">${cands.map((c) => html`<li key=${c.url}><label className="tgl"><input type="checkbox" checked=${sel.has(c.url)} onChange=${() => toggle(c.url)} /><b>${c.name}</b> <span className="muted">${hostName(c.url)}</span>${c.source === 'registro' ? html` <${Badge} tone="ok">catálogo verificado<//>` : null}</label></li>`)}</ul>`
-      : html`<${Note} tone="warn">No encontramos competidores cuyo catálogo podamos leer. Si conoces a tus competidores, escribe sus links y seguimos con el análisis.<//>`}
-      ${rej.length ? html`<details className="manual" open=${!confirm}><summary className="sm">${rej.length} tienda${rej.length === 1 ? '' : 's'} probada${rej.length === 1 ? '' : 's'} que no pudimos usar</summary><ul className="checks">${rej.map((r) => html`<li key=${r.url} className="no"><${Icon} n="x" s=${14} /><span><b>${r.name}</b> <span className="muted">${hostName(r.url)}</span>: ${r.why}</span></li>`)}</ul></details>` : null}
-      <label className="fld" htmlFor="qc-u"><span>${confirm ? 'Agregar otros competidores (opcional, uno por línea)' : 'Links de 2 a 5 competidores (uno por línea)'}</span><textarea id="qc-u" rows=${confirm ? 3 : 5} placeholder=${'marca1.com\nmarca2.com.co'} value=${txt} onInput=${(e) => setTxt(e.target.value)}></textarea></label>
-      ${err ? html`<div className="err" role="alert">${err}</div>` : null}
-      <div className="ob-actions"><button className="btn ghost" type="button" onClick=${onReset}>Analizar otra tienda</button><button className="btn primary" type="submit" disabled=${busy || !urls.length}>${busy ? 'Enviando…' : confirm ? 'Analizar con ' + urls.length + ' competidor' + (urls.length === 1 ? '' : 'es') : 'Continuar con estos competidores'}</button></div>
-    </form>`;
-  }
-  const OWN_REASON = { timeout: 'La tienda tardó demasiado en responder. Puede estar lenta en este momento: intenta de nuevo en unos minutos o sube el catálogo en un archivo.', country_selector: 'Esta dirección es una página para elegir país, no una tienda. Elige el sitio del país que quieres analizar.', unreachable: 'No pudimos conectarnos con la tienda. Revisa que la dirección esté bien escrita.', robots: 'La tienda no permite que programas lean su catálogo (lo indica en su archivo robots.txt) y respetamos esa decisión.', blocked: 'La tienda bloquea las lecturas automáticas.', no_data: 'La tienda no publica su catálogo en un formato que podamos leer automáticamente.' };
-  function OwnAsk({ org, p, onReset, onSent, onRetry }) {
-    const [err, setErr] = useState(''); const [busy, setBusy] = useState(false); const [fix, setFix] = useState('');
-    const useUrl = async (url) => { setBusy(true); setErr(''); try { await L.api('POST', '/quick/' + org + '/own', { url }); onRetry(); } catch (x) { setErr(x.message); setBusy(false); } };
-    const pick = async (e) => {
-      const f = e.target.files && e.target.files[0]; if (!f) return;
-      setBusy(true); setErr('');
-      try {
-        const r = await I.readFile(f);
-        const parsed = r.rows ? { items: I.fromRows(r.rows) } : I.parseText(r.text, null);
-        if (!parsed.items || parsed.items.length < 8) throw new Error('No encontramos al menos 8 productos con nombre y precio. Revisa que el archivo tenga columnas de nombre, precio y categoría.');
-        await L.api('POST', '/quick/' + org + '/catalog', { items: parsed.items.map((x) => ({ name: x.name, price: x.price, promo: x.promo, label: x.label, desc: x.desc, sku: x.sku })) });
-        onSent();
-      } catch (x) { setErr(x.message || 'No se pudo leer el archivo.'); setBusy(false); }
-    };
-    return html`<div className="urlform">
-      <${Note} tone="warn">${OWN_REASON[p.reason] || OWN_REASON.no_data}<//>
-      ${p.redirect ? html`<p className="sm muted">La dirección redirige a ${p.redirect}.</p>` : null}
-      ${p.countries ? html`<div className="chips">${p.countries.map((c) => html`<button key=${c.url} type="button" className="chip" disabled=${busy} onClick=${() => useUrl(c.url)}>${c.label} <span className="muted">${hostName(c.url)}</span></button>`)}</div>` : null}
-      <form className="urlrow" onSubmit=${(e) => { e.preventDefault(); if (fix.trim()) useUrl(fix.trim()); }}><input aria-label="Otra dirección de la tienda" placeholder="O escribe otra dirección de la tienda" value=${fix} onInput=${(e) => setFix(e.target.value)} /><button className="btn sm" type="submit" disabled=${busy || !fix.trim()}>Probar esta dirección</button></form>
-      <p>${p.countries ? 'O sigue' : 'Puedes seguir'} con el análisis subiendo el catálogo en un archivo <b>CSV o Excel</b> con columnas de <b>nombre</b>, <b>precio</b> y, si la tienes, <b>categoría</b> y <b>precio de promoción</b>. La exportación de productos de cualquier tienda en línea sirve.</p>
-<div><label className=${'btn primary' + (busy ? ' disabled' : '')}><input type="file" className="sr" accept=".csv,.txt,.xlsx,.xls" onChange=${pick} />${busy ? 'Leyendo archivo…' : 'Subir catálogo (CSV o Excel)'}</label></div>
-      ${err ? html`<div className="err" role="alert">${err}</div>` : null}
-      <div className="ob-actions"><button className="btn ghost" type="button" onClick=${onReset}>Analizar otra tienda</button></div>
-    </div>`;
-  }
-  function QuickGate({ org, me, children, onReset }) {
-    const [st, setSt] = useState(undefined);
-    const [kick, setKick] = useState(0);
-    useEffect(() => {
-      let alive = true, timer = null, pumping = false;
-      const pull = async () => {
-        let s = null; try { s = await L.api('GET', '/quick/' + org + '/status'); } catch (e) { s = { status: 'failed', error: e.message }; }
-        if (!alive) return; setSt(s);
-        const live = s && (s.status === 'queued' || s.status === 'running');
-        if (live && !pumping) { pumping = true; L.api('POST', '/quick/' + org + '/pump').catch(() => {}).finally(() => { pumping = false; }); }
-        if (live) timer = setTimeout(pull, 3000);
-      };
-      pull();
-      return () => { alive = false; clearTimeout(timer); };
-    }, [org, kick]);
-    if (st === undefined) return html`<${Center}><span className="spin"></span><//>`;
-    if (st && st.status === 'done') return children;
-    const p = (st && st.progress) || {};
-    const cur = PHASES.findIndex((x) => x[0] === (p.phase || 'own'));
-    const detail = { own: p.own != null ? p.own + ' productos tomados para el análisis' + (p.ownTotal > p.own ? ' (de ' + p.ownTotal + ' publicados)' : '') + (p.platform ? ' · ' + p.platform : '') : '', discover: p.candidates ? p.candidates.length + ' candidatos: ' + p.candidates.map((c) => c.name).join(', ') : '', comps: p.found ? p.found.map((f) => f.name + ' (' + f.n + ')').join(', ') || 'Probando tiendas…' : '', cats: p.cats ? p.cats.join(', ') : '', classify: p.classified != null ? p.classified + ' clasificados · ' + (p.left || 0) + ' en cola' : '' };
-    return html`<div className="ob"><div className="ob-in wide">
-      <div className="brandmark"><span className="logo">T</span>TITA Pricing Intelligence <b>360°</b></div>
-      <div className="ob-head"><h2>${st && st.status === 'waiting' ? (p.phase === 'need_own' ? (p.countries ? 'Elige el país de la tienda' : 'Necesitamos tu catálogo') : p.phase === 'confirm_comps' ? 'Confirma tus competidores' : '¿Quiénes son tus competidores?') : st && st.status === 'failed' ? 'No pudimos completar el análisis' : 'Analizando ' + (me.org ? me.org.name : 'la tienda') + '…'}</h2><span className="muted sm">Puedes dejar esta pestaña abierta; el análisis avanza mientras la ves.</span></div>
-      ${st && st.status === 'waiting' && p.phase === 'need_own' ? html`<${OwnAsk} org=${org} p=${p} onReset=${onReset} onSent=${() => { setSt({ status: 'queued', progress: { ...p, phase: 'discover' } }); setKick((x) => x + 1); }} onRetry=${() => { setSt({ status: 'queued', progress: {} }); setKick((x) => x + 1); }} />` :
-        st && st.status === 'waiting' ? html`<${CompsAsk} key=${p.phase + (p.candidates || []).length} org=${org} p=${p} onReset=${onReset} onSent=${() => { setSt({ status: 'queued', progress: { ...p, phase: 'comps', found: p.found || [] } }); setKick((x) => x + 1); }} />` : st && st.status === 'failed' ? html`<div><${Note} tone="warn">${st.error}<//><div className="ob-actions"><button className="btn primary" type="button" onClick=${onReset}>Analizar otra tienda</button></div></div>` : html`<div className="proc">${PHASES.map(([k, t], i) => html`<div key=${k} className=${'procrow ' + (i < cur ? 'done' : i === cur ? 'run' : '')}><span className="st">${i < cur ? html`<${Icon} n="check" s=${12} />` : ''}</span><b>${t}</b><span className="res">${detail[k] || ''}</span></div>`)}</div>`}
-    </div></div>`;
-  }
+  /* ---------- análisis rápido desde un link (web/js/onboard.js) ---------- */
+  const { QuickLanding, QuickGate, saveTok, getTok } = TP.onboard;
 
   /* ---------- acceso ---------- */
   function Login({ onDone }) {
     const [email, setEmail] = useState(''); const [pw, setPw] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
     const submit = async (e) => { e.preventDefault(); setBusy(true); setErr(''); try { await L.api('POST', '/login', { email, password: pw }); onDone(); } catch (x) { setErr(x.message); } setBusy(false); };
-    return html`<${Center}><div className="brandmark"><span className="logo">T</span>TITA Pricing Intelligence <b>360°</b></div><h1>Inteligencia de precios para tu catálogo</h1><form className="urlform" onSubmit=${submit}><label className="fld" htmlFor="lg-e"><span>Correo</span><input id="lg-e" type="email" autoComplete="username" value=${email} onInput=${(e) => setEmail(e.target.value)} /></label><label className="fld" htmlFor="lg-p"><span>Contraseña</span><input id="lg-p" type="password" autoComplete="current-password" value=${pw} onInput=${(e) => setPw(e.target.value)} /></label>${err ? html`<div className="err" role="alert">${err}</div>` : null}<button className="btn primary" type="submit" disabled=${busy || !email || !pw}>${busy ? 'Entrando…' : 'Entrar'}</button></form><p className="muted sm">¿No tienes acceso? Escríbele a tu contacto en Tita Media.</p><//>`;
+    return html`<${Center}><div className="brand"><img src="/brand/tita-mark.svg" alt="" width="26" height="26" /><span className="wm">TITA MEDIA</span><span className="prod">Pricing Intelligence 360°</span></div><h1>Inteligencia de precios para tu catálogo</h1><form className="urlform" onSubmit=${submit}><label className="fld" htmlFor="lg-e"><span>Correo</span><input id="lg-e" type="email" autoComplete="username" value=${email} onInput=${(e) => setEmail(e.target.value)} /></label><label className="fld" htmlFor="lg-p"><span>Contraseña</span><input id="lg-p" type="password" autoComplete="current-password" value=${pw} onInput=${(e) => setPw(e.target.value)} /></label>${err ? html`<div className="err" role="alert">${err}</div>` : null}<button className="btn primary" type="submit" disabled=${busy || !email || !pw}>${busy ? 'Entrando…' : 'Entrar'}</button></form><p className="muted sm">¿No tienes acceso? Escríbele a tu contacto en Tita Media.</p><//>`;
   }
   function ChangePassword({ onDone }) {
     const [pw, setPw] = useState(''); const [pw2, setPw2] = useState(''); const [err, setErr] = useState('');

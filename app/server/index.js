@@ -8,8 +8,10 @@ const jwt = require('jsonwebtoken');
 const { q, migrate } = require('./db');
 const store = require('./store');
 const ai = require('./ai');
+const log = require('./log');
 const bench = require('./bench');
 const jobs = require('./jobs');
+const connectors = require('./connectors');
 const { id, tempPassword, slug } = require('./util');
 
 const PROD = process.env.NODE_ENV === 'production';
@@ -30,6 +32,18 @@ const boot = () => booted || (booted = bootstrap().catch((e) => { booted = null;
 app.use((req, res, next) => { ai.setOidc(req.headers['x-vercel-oidc-token']); next(); });
 app.use((req, res, next) => (req.path.startsWith('/api/') || req.path === '/healthz' ? boot().then(() => next(), (e) => { console.error(e); res.status(503).json({ code: 'db_unavailable', error: 'Base de datos no disponible.' }); }) : next()));
 app.use(express.json({ limit: '4mb' }));
+// CSRF: las peticiones que cambian datos solo se aceptan desde el mismo origen (además de las cookies SameSite=Lax y cuerpo JSON).
+const ALLOWED_ORIGINS = new Set((process.env.ALLOWED_ORIGINS || '').split(',').map((x) => x.trim()).filter(Boolean));
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/') || ['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  const origin = req.get('origin');
+  if (!origin) return next(); // clientes sin navegador (cron con secreto, pruebas); las cookies de sesión siguen siendo obligatorias en rutas privadas
+  let host; try { host = new URL(origin).host; } catch (e) { host = null; }
+  if (host && (host === req.get('host') || ALLOWED_ORIGINS.has(origin))) return next();
+  log.warn('csrf_blocked', { origin, path: req.path });
+  res.status(403).json({ code: 'forbidden_origin', error: 'Origen no permitido.' });
+});
+app.use((req, res, next) => { if (req.path.startsWith('/api/') && !req.is('application/json') && ['POST', 'PUT', 'PATCH'].includes(req.method) && req.headers['content-length'] > 0) return res.status(415).json({ code: 'unsupported_media', error: 'Se espera JSON.' }); next(); });
 app.use(cookieParser());
 app.use((req, res, next) => {
   res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin', 'X-Frame-Options': 'DENY',
@@ -37,7 +51,16 @@ app.use((req, res, next) => {
   next();
 });
 const audit = (org, user, action, detail) => q('insert into audit (org_id, user_id, action, detail) values ($1,$2,$3,$4)', [org || null, user || null, action, detail || null]).catch(() => {});
-const wrap = (fn) => (req, res) => fn(req, res).catch((e) => { if (!e.status) console.error(e); res.status(e.status || 500).json({ code: e.code || 'error', error: e.status ? e.message : 'Error interno' }); });
+// Errores: el detalle técnico queda en el log estructurado (con un id de referencia); el usuario recibe un mensaje claro sin datos internos.
+const wrap = (fn) => (req, res) => fn(req, res).catch((e) => {
+  const ref = crypto.randomBytes(4).toString('hex');
+  if (!e.status) {
+    const persistence = /^(08|23|25|40|42|53|57)/.test(String(e.code || '')) || /ECONNREFUSED|connection|timeout/i.test(String(e.message));
+    log.error('request_error', { ref, method: req.method, path: req.path, code: e.code, message: String(e.message).slice(0, 300), stack: String(e.stack || '').split('\n').slice(0, 4).join(' | ') });
+    return res.status(persistence ? 503 : 500).json({ code: persistence ? 'persistence_error' : 'error', error: persistence ? 'No pudimos guardar o leer los datos en este momento. Intenta de nuevo en unos minutos (ref. ' + ref + ').' : 'Error interno (ref. ' + ref + ').' });
+  }
+  res.status(e.status).json({ code: e.code || 'error', error: e.message });
+});
 const fail = (status, code, message) => Object.assign(new Error(message), { status, code });
 
 /* ---------- sesión ---------- */
@@ -269,20 +292,48 @@ app.post('/api/quick/:org/pump', auth, orgAccess(1), wrap(async (req, res) => {
   if (!k || k.kind !== 'quick') throw fail(400, 'invalid', 'No es un análisis rápido.');
   res.json({ ran: await jobs.step(req.params.org) });
 }));
-app.post('/api/quick/:org/comps', auth, orgAccess(1), wrap(async (req, res) => {
-  const k = (await q('select kind from orgs where id = $1', [req.params.org])).rows[0];
+const quickJob = async (org) => {
+  const k = (await q('select kind from orgs where id = $1', [org])).rows[0];
   if (!k || k.kind !== 'quick') throw fail(400, 'invalid', 'No es un análisis rápido.');
-  // Se conserva la ruta de país (zara.com/co) y se aceptan hasta 12 competidores.
-  const full = (u) => { u = String(u || '').trim(); if (!TPI.ingest.origin(u)) return null; const x = new URL(/^https?:/i.test(u) ? u : 'https://' + u); return x.origin + (x.pathname.length > 1 ? x.pathname.replace(/\/$/, '') : ''); };
-  const urls = [...new Set((Array.isArray(req.body.urls) ? req.body.urls : []).map(full).filter(Boolean))].slice(0, 16);
-  if (!urls.length) throw fail(400, 'invalid_url', 'Escribe al menos un link válido, por ejemplo marca.com');
-  const j = (await q("select id, progress from jobs where org_id = $1 and type = 'quick' order by created_at desc limit 1", [req.params.org])).rows[0];
+  const j = (await q("select id, status, progress from jobs where org_id = $1 and type = 'quick' order by created_at desc limit 1", [org])).rows[0];
   if (!j) throw fail(404, 'not_found', 'No hay análisis.');
+  return j;
+};
+const fullUrl = (u) => { u = String(u || '').trim().slice(0, 300); if (!TPI.ingest.origin(u)) return null; const x = new URL(/^https?:/i.test(u) ? u : 'https://' + u); if (!/^https?:$/.test(x.protocol)) return null; return x.origin + (x.pathname.length > 1 ? x.pathname.replace(/\/$/, '') : ''); };
+// Confirmación de competidores: los propuestos que el usuario deja marcados más los que agrega. Se conserva la ruta de país (zara.com/co).
+app.post('/api/quick/:org/comps', auth, orgAccess(1), wrap(async (req, res) => {
+  const j = await quickJob(req.params.org);
+  const urls = [...new Set((Array.isArray(req.body.urls) ? req.body.urls : []).map(fullUrl).filter(Boolean))].slice(0, 16);
+  if (!urls.length) throw fail(400, 'invalid_url', 'Escribe al menos un link válido, por ejemplo marca.com');
   const p = j.progress || {};
-  const tried = (p.tried || []).filter((u) => !urls.includes(u));
-  const named = Object.fromEntries((p.candidates || []).map((c) => [full(c.url), c.name]));
-  await q("update jobs set status = 'queued', error = null, lease_until = null, updated_at = now(), progress = $2 where id = $1", [j.id, { ...p, phase: 'comps', manual: true, tried, candidates: urls.map((u) => ({ name: named[u] || TPI.ingest.hostOf(u), url: u })) }]);
-  res.json({ ok: true });
+  const prev = Object.fromEntries((p.comps || []).map((c) => [fullUrl(c.url), c]));
+  const cand = Object.fromEntries((p.candidates || []).map((c) => [fullUrl(c.url), c]));
+  const comps = await Promise.all(urls.map(async (u) => prev[u] || { name: (cand[u] && cand[u].name) || TPI.ingest.hostOf(u), url: u, category: cand[u] && cand[u].category, source: cand[u] ? cand[u].source : 'usuario', verified: cand[u] ? cand[u].verified : await jobs.verifyDomain(u), read: { status: 'pending' } }));
+  await q("update jobs set status = 'queued', error = null, lease_until = null, updated_at = now(), progress = $2 where id = $1", [j.id, { ...p, phase: 'comps', manual: true, comps }]);
+  res.json({ ok: true, n: comps.length });
+}));
+// Reintentar solo las lecturas fallidas (todas o las indicadas), también después de terminado el análisis.
+app.post('/api/quick/:org/retry', auth, orgAccess(1), wrap(async (req, res) => {
+  const j = await quickJob(req.params.org);
+  if (['queued', 'running'].includes(j.status)) throw fail(409, 'busy', 'El análisis está en curso; espera a que termine.');
+  const p = j.progress || {};
+  const only = Array.isArray(req.body.urls) ? req.body.urls.map(fullUrl) : null;
+  let n = 0;
+  (p.comps || []).forEach((c) => { if (c.read && c.read.status === 'failed' && (!only || only.includes(fullUrl(c.url)))) { c.read = { status: 'pending', retry: (c.read.retry || 0) + 1 }; n++; } });
+  if (!n) throw fail(400, 'invalid', 'No hay lecturas fallidas para reintentar.');
+  await q("update jobs set status = 'queued', error = null, lease_until = null, updated_at = now(), progress = $2 where id = $1", [j.id, { ...p, phase: 'comps' }]);
+  res.json({ ok: true, n });
+}));
+// Estrategia (paso 4 del onboarding): objetivo y restricciones mínimas. Se puede responder mientras el análisis avanza.
+app.post('/api/quick/:org/strategy', auth, orgAccess(1), wrap(async (req, res) => {
+  const j = await quickJob(req.params.org);
+  const b = req.body || {};
+  const num = (v, lo, hi) => (v === '' || v == null || !isFinite(Number(v)) ? null : Math.max(lo, Math.min(hi, Number(v))));
+  const sg = { objective: ['competitividad', 'margen', 'volumen', 'posicionamiento'].includes(b.objective) ? b.objective : 'competitividad', maxChange: num(b.maxChange, 0.02, 0.3) || 0.12, minMargin: num(b.minMargin, 0, 0.9), rounding: ['psico', 'multiplo', 'none'].includes(b.rounding) ? b.rounding : 'psico' };
+  await q("update jobs set progress = progress || $2, updated_at = now() where id = $1", [j.id, { strategy: sg }]);
+  const cfg = await store.get(req.params.org, 'ws', 'config');
+  if (cfg) await store.put(req.params.org, 'ws', 'config', { ...cfg, objective: sg.objective, policy: { ...(cfg.policy || {}), maxChange: sg.maxChange, rounding: sg.rounding, ...(sg.minMargin != null ? { minMargin: sg.minMargin } : {}) } }, req.user.id);
+  res.json({ ok: true, strategy: sg });
 }));
 // El usuario elige el sitio de su país (o corrige la dirección) y el análisis vuelve a leer la tienda propia, sin consumir otro análisis.
 app.post('/api/quick/:org/own', auth, orgAccess(1), wrap(async (req, res) => {
@@ -300,21 +351,43 @@ app.post('/api/quick/:org/own', auth, orgAccess(1), wrap(async (req, res) => {
   await q("update jobs set status = 'queued', error = null, lease_until = null, updated_at = now(), progress = '{}'::jsonb where id = $1", [j.id]);
   res.json({ ok: true });
 }));
+// Conexión autenticada a la tienda propia (Shopify Admin, WooCommerce REST, VTEX). Las credenciales se usan una vez y se descartan.
+const connectTries = new Map();
+app.post('/api/quick/:org/connect', auth, orgAccess(1), wrap(async (req, res) => {
+  const j = await quickJob(req.params.org);
+  if (((j.progress || {}).phase) !== 'need_own') throw fail(400, 'invalid', 'El análisis no está esperando la tienda.');
+  const k = req.params.org, now = Date.now();
+  const tries = (connectTries.get(k) || []).filter((t) => now - t < 3600e3);
+  if (tries.length >= 6) throw fail(429, 'rate_limited', 'Demasiados intentos de conexión. Espera una hora.');
+  connectTries.set(k, [...tries, now]);
+  const b = req.body || {};
+  let r;
+  try { r = await connectors.readAuthenticated(String(b.platform || ''), { store: b.store, token: b.token, key: b.key, secret: b.secret, account: b.account, appKey: b.appKey, appToken: b.appToken }); }
+  catch (e) { throw fail(400, e.code === 'auth_failed' ? 'auth_failed' : 'connect_failed', e.message); }
+  if (r.items.length < 8) throw fail(400, 'connect_failed', 'La conexión funcionó, pero encontramos solo ' + r.items.length + ' productos con precio.');
+  await saveOwnCatalog(req.params.org, j, r.items, r.method, r.origin);
+  res.json({ ok: true, n: r.items.length });
+}));
+// Guarda el catálogo propio que llega por archivo o por conexión autenticada y continúa con la búsqueda de competidores.
+async function saveOwnCatalog(org, j, items, method, origin) {
+  const pick = items.length <= 90 ? items : items.filter((_, i) => i % Math.ceil(items.length / 90) === 0).slice(0, 90);
+  const now = new Date().toISOString(); pick.forEach((it) => { it.src = it.src || method; it.at = it.at || now; });
+  const chunks = await jobs.saveCatalog(org, 'own', pick, 0);
+  const s = await store.get(org, 'stores', 'own');
+  const label = { file: 'Archivo CSV o Excel', auth_shopify: 'Conexión autenticada Shopify', auth_woocommerce: 'Conexión autenticada WooCommerce', auth_vtex: 'Conexión autenticada VTEX' }[method] || method;
+  await store.put(org, 'stores', 'own', { ...s, n: pick.length, total: items.length, chunks, platform: null, method, importedAt: now }, 'sistema');
+  const ownDiag = { stage: 'done', status: 'ok', method, methodLabel: label, origin: origin || null, found: items.length, priced: items.length, categories: new Set(items.map((x) => x.label)).size, warnings: method === 'file' ? ['Datos cargados desde un archivo: la fecha de los precios es la de la carga.'] : [], attempts: (((j.progress || {}).ownDiag || {}).attempts || []), at: now };
+  await q("update jobs set status = 'queued', error = null, lease_until = null, updated_at = now(), progress = $2 where id = $1", [j.id, { ...(j.progress || {}), phase: 'discover', own: pick.length, ownTotal: items.length, platform: null, method, ownDiag }]);
+}
 // Catálogo propio subido por el usuario (CSV o Excel ya interpretados en el navegador) cuando la tienda no se puede leer.
 app.post('/api/quick/:org/catalog', auth, orgAccess(1), wrap(async (req, res) => {
-  const k = (await q('select kind from orgs where id = $1', [req.params.org])).rows[0];
-  if (!k || k.kind !== 'quick') throw fail(400, 'invalid', 'No es un análisis rápido.');
+  const j = await quickJob(req.params.org);
+  if (((j.progress || {}).phase) !== 'need_own') throw fail(400, 'invalid', 'El análisis no está esperando la tienda.');
   const raw = Array.isArray(req.body.items) ? req.body.items.slice(0, 3000) : [];
   const items = raw.map((o, i) => TPI.ingest.mkItem({ id: 'f:' + (o.sku || TPI.ingest.slug(String(o.name || '')) + '-' + i), name: o.name, label: o.label, price: Number(o.price), promo: Number(o.promo) > 0 ? Number(o.promo) : null, desc: o.desc, sku: o.sku })).filter((x) => x.name && x.price > 0);
   if (items.length < 8) throw fail(400, 'invalid', 'El archivo necesita al menos 8 productos con nombre y precio.');
-  const j = (await q("select id, progress from jobs where org_id = $1 and type = 'quick' order by created_at desc limit 1", [req.params.org])).rows[0];
-  if (!j) throw fail(404, 'not_found', 'No hay análisis.');
-  const pick = items.length <= 90 ? items : items.filter((_, i) => i % Math.ceil(items.length / 90) === 0).slice(0, 90);
-  const chunks = await jobs.saveCatalog(req.params.org, 'own', pick, 0);
-  const s = await store.get(req.params.org, 'stores', 'own');
-  await store.put(req.params.org, 'stores', 'own', { ...s, n: pick.length, total: items.length, chunks, platform: 'Archivo', importedAt: new Date().toISOString() }, 'sistema');
-  await q("update jobs set status = 'queued', error = null, lease_until = null, updated_at = now(), progress = $2 where id = $1", [j.id, { ...(j.progress || {}), phase: 'discover', own: pick.length, ownTotal: items.length, platform: 'Archivo' }]);
-  res.json({ ok: true, n: pick.length });
+  await saveOwnCatalog(req.params.org, j, items, 'file');
+  res.json({ ok: true, n: items.length });
 }));
 app.get('/api/admin/bench', auth, titaOnly, wrap(async (req, res) => res.json(await bench.latest())));
 app.post('/api/admin/bench', auth, titaOnly, wrap(async (req, res) => res.json(await bench.run(250000))));

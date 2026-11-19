@@ -27,12 +27,20 @@ const did = TP.did(wk, { pid: 't', at: days[6], from: 100, to: 90 }, ['c']);
 console.log('DiD elasticidad', did.e.toFixed(2), 'IC90', did.lo.toFixed(2) + '..' + did.hi.toFixed(2), '(verdadero ≈ ' + (Math.log(1.2) / Math.log(0.9)).toFixed(2) + ')');
 
 const near = (a, b, tol) => Math.abs(a - b) <= tol;
+// 5) Homologación: el tamaño declarado en el nombre impide comparar productos de distinta talla
+const hc = { attrs: [0, 1, 2].map((i) => ({ id: 'a' + i, name: 'A' + i })) };
+const mkp = (name, lv) => ({ name, typ: 'Colchón', mat: 'Espuma', lv, lvRaw: lv });
+const sKing = TP.similarity(hc, mkp('Colchón Nube King 200x200', [3, 3, 3]), mkp('Colchón Brisa Sencillo 100x190', [3, 3, 3]));
+const sSame = TP.similarity(hc, mkp('Colchón Nube Queen 160x190', [3, 3, 3]), mkp('Colchón Brisa Queen 160 x 190 cm', [3, 4, 3]));
+const vol = TP.sizeOf('Shampoo nutritivo 400 ml'), vol2 = TP.sizeOf('Shampoo nutritivo 1 L');
+console.log('HOMOLOGACIÓN king vs sencillo', sKing.score.toFixed(2), sKing.why.join(' | '), '· queen vs queen', sSame.score.toFixed(2), '· volumen', vol.v, vol2.v);
 const checks = [
   m.ok && near(m.coef[0].b, 0.1, 0.02) && near(m.coef[1].b, 0.05, 0.02) && !m.coef[2].sig && m.excluded.length >= 1,
   m.coverage > 0.65 && m.coverage < 0.92,
   c.rows.every((x, j) => x.pw.every((v, i) => near(v, U[j][i] - TP.mean(U[j]), 0.2))) && c.pricePw.every((v, i) => near(v, PU[i] - TP.mean(PU), 0.2)),
   vw.pmc < vw.opp && vw.opp < vw.ipp && vw.ipp < vw.pme,
   did.lo < Math.log(1.2) / Math.log(0.9) && did.hi > Math.log(1.2) / Math.log(0.9),
+  sKing.sizeMismatch && sKing.score < 0.7 && !sSame.sizeMismatch && sSame.score >= 0.7 && vol.v === 400 && vol2.v === 1000,
 ];
 console.log(checks.every(Boolean) ? 'OK' : 'FALLÓ ' + JSON.stringify(checks));
 process.exit(checks.every(Boolean) ? 0 : 1);

@@ -56,8 +56,16 @@ Con `AI_PROVIDER=gateway` el servidor usa Vercel AI Gateway en lugar de la API d
 - **Sin modelo hedónico** (muestra insuficiente), una sugerencia de cambio exige al menos 3 comparables cercanos y que el precio quede fuera de su rango P25–P75.
 - `npm run test:unit` valida el motor con datos simulados de parámetros conocidos (hedónico, conjoint L18, Van Westendorp, diferencias en diferencias) y el lector de catálogos.
 
+## Documentación técnica
+- `../docs/ARQUITECTURA-LECTURA.md`: motor de lectura por niveles, diagnóstico, evaluación de competidores, homologación y seguridad.
+- `../docs/DISENO.md`: sistema visual tomado de titamedia.com y decisiones de producto.
+- `../docs/QA-RESULTADOS.md`: resultados de la batería de pruebas (`npm run test:battery`).
+
+## Pruebas
+`npm run test:all` ejecuta: matemática (`test/math.js`), lector (`test/crawl.js`), batería de casos (`test/battery.js`), cuentas y permisos (`test/e2e.js`), análisis rápido en navegador (`test/quick.js`) y responsive y accesibilidad (`test/ux.js`). Usan Postgres embebido y tiendas e IA simuladas; no tocan servicios reales.
+
 ## Variables
-Ver `.env.example`. Las más importantes: `DATABASE_URL`, `SESSION_SECRET`, `ANTHROPIC_API_KEY`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `REFRESH_CRON` (por defecto 5:17 a. m. hora de Bogotá), `AI_MODEL`.
+Ver `.env.example`. Nuevas en esta versión: `ALLOW_PRIVATE_NETWORK` (solo pruebas), `FETCH_MAX_BYTES`, `HEADLESS`, `BROWSER_WS_ENDPOINT`, `QUICK_AI_TOKENS_DAY`, `ORG_AI_TOKENS_DAY`, `ALLOWED_ORIGINS`, `LOG_SILENT`, `AI_SEARCH_MODEL`, `QUICK_COMP_TIMEOUT_MS`, `QUICK_CATS`, `QUICK_COMPS`. Las más importantes: `DATABASE_URL`, `SESSION_SECRET`, `ANTHROPIC_API_KEY`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `REFRESH_CRON` (por defecto 5:17 a. m. hora de Bogotá), `AI_MODEL`.
 
 ## Consideraciones
 - **Rastreo:** solo se leen catálogos públicos en formato JSON de la plataforma, respetando robots.txt y con pausa entre páginas. Antes de comercializar, valida con jurídico los términos de uso de los sitios de la competencia de cada cliente.

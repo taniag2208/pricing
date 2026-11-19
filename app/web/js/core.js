@@ -107,7 +107,10 @@
     const recent = Object.entries(E.ws ? E.ws.history || {} : {}).flatMap(([sid, h]) => (h.changes || []).filter((x) => Date.now() - new Date(x.at).getTime() < 7 * 864e5).map((x) => ({ ...x, sid })));
     if (recent.length) { const up = recent.filter((x) => x.to > x.from).length; alerts.unshift({ tone: 'info', t: recent.length + ' cambios de precio de la competencia en los últimos 7 días', d: up + ' subidas y ' + (recent.length - up) + ' bajadas en ' + new Set(recent.map((x) => x.sid)).size + ' tiendas, detectadas en la actualización diaria.', a: () => go('market', { sub: 'escalera' }), al: 'Ver escalera' }); }
     if (!E.hasCost && E.P && E.P.priv) alerts.push({ tone: 'info', t: 'Sin costos cargados', d: 'Sin costos no calculamos el precio mínimo rentable ni el margen de cada escenario.', a: () => go(E.P.config ? 'data' : 'privados', { sub: 'privados' }), al: 'Cargar costos' });
-    (E.cfg.rejected || []).length && alerts.push({ tone: 'info', t: E.cfg.rejected.length + ' competidores encontrados no entraron al análisis', d: E.cfg.rejected.slice(0, 6).map((r) => r.name + ': ' + r.why).join(' · ') + (E.cfg.rejected.length > 6 ? ' · …' : '') });
+    const cps = E.cfg.competitors || [];
+    const pend = cps.filter((c) => c.read && c.read.status === 'failed'), refs = cps.filter((c) => !c.include && !(c.read && c.read.status === 'failed'));
+    if (pend.length) alerts.push({ tone: 'info', t: pend.length + ' competidores quedaron como referencia pendiente', d: pend.slice(0, 6).map((r) => r.name + ': ' + r.read.why).join(' · ') + (pend.length > 6 ? ' · …' : '') + '. Puedes reintentar solo esas lecturas en Cobertura de datos.', a: () => go('overview', { sub: 'cobertura' }), al: 'Ver cobertura' });
+    if (refs.length) alerts.push({ tone: 'info', t: refs.length + ' competidores no entraron al análisis de precios', d: refs.slice(0, 6).map((r) => r.name + ': ' + (r.note || 'sin datos comparables').replace(/\.$/, '')).join(' · ') + '. Se conservan como referencia.' });
     E.cats.filter((c) => (E.pool[c.id] || []).length < 10).forEach((c) => alerts.push({ tone: 'warn', t: c.name + ': comparación débil', d: 'Solo hay ' + (E.pool[c.id] || []).length + ' productos de la competencia en esta categoría. Los resultados de esta categoría son orientativos; agrega competidores para hacerla confiable.' }));
     const ex = E.D.excluded || {};
     if (ex.bundle || ex.gift) alerts.push({ tone: 'info', t: 'Comparamos productos sueltos al precio de venta actual', d: [ex.bundle ? ex.bundle + ' combos o sets' : '', ex.gift ? ex.gift + ' obsequios o precios simbólicos' : ''].filter(Boolean).join(' y ') + ' quedaron fuera para no comparar paquetes contra productos individuales.' });
@@ -116,6 +119,17 @@
     return html`<div className="page">
       <header className="ph"><div><div className="eyebrow">Overview</div><h1>¿Qué está pasando con tus precios?</h1><p>${E.D.brandById.own.name} frente a ${E.cfg.comps.length} competidores en ${E.cats.length} categorías · ${TP.MARKETS[E.cfg.market].name}, ${E.mk.currency}</p></div>
         <button className="startcard" type="button" onClick=${() => go(start[1], start[2])}><span className="eyebrow">Tu prioridad: ${A.OBJECTIVES.find((o) => o.v === obj).l}</span><b>${start[0]}</b><${Icon} n="arrow" /></button></header>
+      ${(E.cfg.ownDiag || cps.length) ? html`<section className="panel cover" id="cobertura"><div className="ptitle"><div><span className="eyebrow">Cobertura de datos</span><h2>Con qué información se hizo este análisis</h2></div>
+          <span className="muted sm">${E.cfg.ownDiag && E.cfg.ownDiag.at ? 'Catálogo leído el ' + new Date(E.cfg.ownDiag.at).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }) : ''}</span></div>
+        <div className="kpis compact">
+          <div className="kpi"><span>Tu catálogo</span><b>${(E.cfg.ownDiag && E.cfg.ownDiag.priced) || E.D.products.filter((p) => p.brand === 'own').length}</b><em>${E.cfg.ownDiag ? (E.cfg.ownDiag.methodLabel || '') + (E.cfg.ownDiag.currency ? ' · ' + E.cfg.ownDiag.currency : '') : 'productos con precio'}</em></div>
+          <div className="kpi"><span>Competidores en el análisis</span><b>${cps.filter((c) => c.include).length || E.cfg.comps.length}<small>/${cps.length || E.cfg.comps.length}</small></b><em>${cps.length ? cps.filter((c) => !c.include).length + ' como referencia o pendientes' : 'confirmados'}</em></div>
+          <div className="kpi"><span>Productos comparables</span><b>${E.cats.reduce((n, c) => n + (E.pool[c.id] || []).length, 0)}</b><em>de la competencia, en ${E.cats.length} categorías</em></div>
+          <div className="kpi"><span>Categorías con modelo</span><b>${E.cats.filter((c) => E.model[c.id].ok).length}<small>/${E.cats.length}</small></b><em>las demás usan solo comparables directos</em></div>
+        </div>
+        ${cps.length ? html`<details className="manual"><summary>Ver competidores, cómo los clasificamos y su evidencia</summary><${TP.onboard.CompetitorBoard} comps=${cps} org=${TP.live.org} canRetry=${String(TP.live.org || '').startsWith('q-') && !(E.P && E.P.guest === false && !E.P.tita)} onRetried=${() => location.reload()} /></details>` : null}
+        ${E.cfg.ownDiag ? html`<details className="manual"><summary>Ver diagnóstico de conexión de tu tienda</summary><${TP.onboard.ConnectionDiagnosis} d=${E.cfg.ownDiag} title=${E.D.brandById.own.name} /></details>` : null}
+      </section>` : null}
       <div className="kpis">
         <div className="kpi"><span>Portafolio con precio estimado</span><b>${valid.length}<small>/${E.allDiag.length}</small></b><em>${Math.round((valid.length / Math.max(1, E.allDiag.length)) * 100)} % del catálogo analizado</em></div>
         <div className="kpi"><span>Índice de precio vs. mercado</span><b>${isFinite(idx) ? Math.round(idx * 100) : '—'}</b><em>100 = mediana de la competencia (mediana entre categorías)</em></div>
@@ -320,7 +334,7 @@
             <p className="cexp">${explain(x)}</p>
             ${lock ? null : html`<div className="mapact"><button type="button" className=${'btn sm ' + (d === 'accept' ? 'primary' : '')} onClick=${() => setD(x.key, 'accept')}><${Icon} n="check" />Es comparable</button><button type="button" className=${'btn sm ' + (d === 'reject' ? 'danger' : '')} onClick=${() => setD(x.key, 'reject')}><${Icon} n="x" />No es comparable</button></div>`}
           </div></article>`; })}</div>` : html`<${Empty} title="Sin comparables con similitud suficiente">Amplía los competidores de la vista o revisa la homologación.<//>`}
-        <p className="foot">Íconos ilustrativos por tipo y color (las fotos de otras tiendas no se pueden cargar aquí; usa «ver en la tienda»). Los comparables descartados dejan de usarse en el Price Advisor.</p>
+        <p className="foot">Íconos ilustrativos por tipo y color (las fotos de otras tiendas no se pueden cargar aquí; usa «ver en la tienda»). Los comparables descartados dejan de usarse en el Pricing Advisor.</p>
       </div></div>`;
   }
 

@@ -319,7 +319,7 @@
     else if (step === 3) body = html`<div><${A.CategoryStudio} ws=${ws} ro=${ro} jobs=${jobs} /><div className="ob-actions"><button className="btn primary" type="button" disabled=${ro || !cfg.cats.length} onClick=${() => go(4)}>Continuar<${Icon} n="arrow" /></button></div></div>`;
     else body = html`<div><${A.ClassifyPanel} ws=${ws} ro=${ro} jobs=${jobs} /><${Note}>Puedes entrar al panel cuando quieras: el análisis usa lo ya clasificado y la clasificación sigue en segundo plano. El cliente no ve nada hasta que publiques la cuenta.<//><div className="ob-actions"><button className="btn primary" type="button" disabled=${ro} onClick=${() => A.saveConfig(ws, { setupDone: true, step: 5 })}>Ir al panel<${Icon} n="arrow" /></button></div></div>`;
     return html`<div className="ob"><div className="ob-in wide">
-      <div className="brandmark"><span className="logo">T</span>TITA Pricing Intelligence <b>360°</b></div>
+      <div className="brand"><img src="/brand/tita-mark.svg" alt="" width="26" height="26" /><span className="wm">TITA MEDIA</span><span className="prod">Pricing Intelligence 360°</span></div>
       <div className="eyebrow">Configuración de la cuenta · ${orgName || ''}</div>
       ${step === 0 ? html`<h1>Configura la cuenta del cliente</h1><p className="lead">Registra la tienda del cliente y sus competidores. El servidor importa los catálogos, la IA propone categorías y clasifica los atributos, y cuando todo esté revisado publicas la cuenta para el cliente.</p>` : html`<h2>${steps[step]}</h2>`}
 

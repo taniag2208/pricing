@@ -228,6 +228,22 @@
   };
 
   /* ---------- similitud producto contra producto ---------- */
+  // Tamaño o presentación leído del nombre: medidas (140x190), tallas de cama, volumen y peso. null si no hay.
+  const BED = { cuna: 1, sencillo: 2, sencilla: 2, twin: 2, semidoble: 3, full: 3, doble: 4, queen: 5, king: 6 };
+  TP.sizeOf = function (name) {
+    const t = strip(String(name || ''));
+    const dim = t.match(/(\d{2,3}(?:[.,]\d)?)\s*(?:x|×|\*)\s*(\d{2,3}(?:[.,]\d)?)(?:\s*(?:x|×|\*)\s*\d{1,3})?\s*(cm)?/);
+    if (dim) { const w = parseFloat(dim[1].replace(',', '.')), h = parseFloat(dim[2].replace(',', '.')); return { kind: 'dim', v: Math.min(w, h) * Math.max(w, h), label: Math.min(w, h) + '×' + Math.max(w, h) }; }
+    const bed = t.match(/\b(super king|king|queen|semidoble|doble|sencill[oa]|twin|full|cuna)\b/);
+    if (bed) { const k = bed[1].replace('super king', 'king'); return { kind: 'bed', v: BED[k] || BED[k.replace(/a$/, 'o')], label: bed[1] }; }
+    const vol = t.match(/(\d+(?:[.,]\d+)?)\s*(ml|cc|litros?|lts?|l)\b/);
+    if (vol) { const n = parseFloat(vol[1].replace(',', '.')); return { kind: 'vol', v: /^m|^c/.test(vol[2]) ? n : n * 1000, label: vol[1] + ' ' + vol[2] }; }
+    const wt = t.match(/(\d+(?:[.,]\d+)?)\s*(kg|kilos?|gr|g)\b/);
+    if (wt) { const n = parseFloat(wt[1].replace(',', '.')); return { kind: 'wt', v: /^k/.test(wt[2]) ? n * 1000 : n, label: wt[1] + ' ' + wt[2] }; }
+    return null;
+  };
+  const NAME_STOP = new Set(['para', 'con', 'sin', 'de', 'del', 'la', 'el', 'los', 'las', 'y', 'en', 'por', 'mujer', 'hombre', 'unisex', 'color', 'talla', 'ref']);
+  const tokensOf = (n) => new Set(strip(String(n || '')).split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !NAME_STOP.has(w) && !/^\d+$/.test(w)));
   TP.similarity = function (cat, a, b) {
     const sameTyp = a.typ === b.typ;
     const sameMat = a.mat === b.mat;
@@ -237,14 +253,24 @@
     const kd = diffs.filter((_, i) => known[i]);
     const mad = kd.length ? mean(kd.map(Math.abs)) : 2;
     const cover = a.lv.length ? kd.length / a.lv.length : 0;
-    const score = (sameTyp ? 0.4 : 0.05) + (sameMat ? 0.15 : 0.04) + 0.45 * (1 - mad / 4) * (0.5 + 0.5 * cover);
+    let score = (sameTyp ? 0.4 : 0.05) + (sameMat ? 0.15 : 0.04) + 0.45 * (1 - mad / 4) * (0.5 + 0.5 * cover);
+    // Tamaño o presentación: si ambos lo declaran y no coincide (más de 15 % de diferencia), no son equivalentes.
+    const sa = TP.sizeOf(a.name), sb = TP.sizeOf(b.name);
+    const sizeMismatch = !!(sa && sb && sa.kind === sb.kind && Math.abs(sa.v - sb.v) / Math.max(sa.v, sb.v) > 0.15);
+    if (sizeMismatch) score = Math.min(score - 0.25, 0.6);
+    // Nombres: palabras en común (sin marcas ni palabras vacías) suben un poco la similitud; no la deciden.
+    const ta = tokensOf(a.name), tb = tokensOf(b.name);
+    const inter = [...ta].filter((w) => tb.has(w));
+    const jac = ta.size && tb.size ? inter.length / (ta.size + tb.size - inter.length) : 0;
+    score += 0.05 * jac;
+    const why = [sameTyp ? 'mismo tipo (' + a.typ + ')' : 'tipo distinto', sameMat ? 'mismo material' : 'material distinto', kd.length + ' de ' + a.lv.length + ' atributos con evidencia en ambos' + (kd.length ? ', diferencia media ' + mad.toFixed(1) + ' niveles' : ''), sa && sb ? (sizeMismatch ? 'tamaño distinto (' + sa.label + ' frente a ' + sb.label + ')' : sa.kind === sb.kind ? 'mismo tamaño (' + sa.label + ')' : null) : null, inter.length ? 'nombres comparten: ' + inter.slice(0, 4).join(', ') : null].filter(Boolean);
     const shared = cat.attrs.filter((_, i) => known[i] && diffs[i] === 0).map((x) => x.name);
     const differ = cat.attrs.map((x, i) => ({ attr: x, d: diffs[i] })).filter((x, i) => known[i] && Math.abs(x.d) >= 1);
     const label = score >= 0.85 ? 'Muy similar' : score >= 0.72 ? 'Similar' : 'Parcial';
     let conf = 'Clasificación con evidencia completa';
     if (!b.hasDesc && !b.matPublic) conf = 'Atributos inferidos solo de imagen';
     else if (!b.hasDesc || !b.matPublic) conf = 'Evidencia parcial: revisar';
-    return { score, sameTyp, sameMat, shared, differ, label, conf };
+    return { score, sameTyp, sameMat, shared, differ, label, conf, why, sizeMismatch };
   };
   TP.comparablesFor = function (cat, p, pool, compDec, opts) {
     const lim = (opts && opts.limit) || 5;

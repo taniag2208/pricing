@@ -39,7 +39,21 @@ function mapError(e) {
   return err('upstream_error', (e && e.message) || 'Error desconocido');
 }
 
+// Límite diario de consumo de IA por cuenta (tokens de entrada + salida en 24 h). Análisis rápidos: QUICK_AI_TOKENS_DAY; cuentas: ORG_AI_TOKENS_DAY.
+const LIMIT_QUICK = Number(process.env.QUICK_AI_TOKENS_DAY || 1500000), LIMIT_ORG = Number(process.env.ORG_AI_TOKENS_DAY || 6000000);
+const usageCache = new Map();
+async function checkBudget(orgId) {
+  if (!orgId) return;
+  const c = usageCache.get(orgId);
+  if (c && Date.now() - c.at < 20000) { if (c.used >= c.limit) throw err('ai_limit', 'Se alcanzó el límite diario de uso de IA de esta cuenta. Se renueva en 24 horas.'); return; }
+  const r = await q("select coalesce(sum(coalesce(input_tokens,0) + coalesce(output_tokens,0)),0)::bigint as n from ai_usage where org_id = $1 and at > now() - interval '24 hours'", [orgId]).catch(() => ({ rows: [{ n: 0 }] }));
+  const limit = String(orgId).startsWith('q-') ? LIMIT_QUICK : LIMIT_ORG;
+  usageCache.set(orgId, { at: Date.now(), used: Number(r.rows[0].n), limit });
+  if (Number(r.rows[0].n) >= limit) throw err('ai_limit', 'Se alcanzó el límite diario de uso de IA de esta cuenta. Se renueva en 24 horas.');
+}
+
 async function call({ messages, system, tools, tier, maxTokens, orgId, userId, kind, model }) {
+  await checkBudget(orgId);
   const client = getClient();
   if (!client) throw err('sampling_disabled', 'La IA no está configurada en el servidor.');
   const req = { model: model || MODEL, max_tokens: maxTokens || 16000, messages };

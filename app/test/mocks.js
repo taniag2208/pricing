@@ -19,6 +19,37 @@ function store(port, name, n, eff, lvl, mode) {
   const all = catalog(name, n, eff, lvl, port);
   const srv = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
+    const sale = (p) => Number(p.variants[0].price), list = (p) => Number(p.variants[0].compare_at_price || p.variants[0].price);
+    if (u.pathname === '/robots.txt' && ['vtex', 'woo', 'woo_usd', 'dynamic', 'partial', 'noprice'].includes(mode)) { res.end('User-agent: *\nDisallow: /checkout\n'); return; }
+    if (mode === 'waf') { res.statusCode = 403; res.setHeader('Server', 'cloudflare'); res.setHeader('cf-ray', 'x'); res.end('<html><title>Attention Required! | Cloudflare</title>Access denied</html>'); return; }
+    if (mode === 'vtex') {
+      if (u.pathname === '/') { res.setHeader('Content-Type', 'text/html'); res.end('<html lang="es-CO"><script>window.__RUNTIME__={"culture":{"currency":"COP"}};var vtex={"currencyCode":"COP"}</script><link href="https://x.vteximg.com.br/a.css">Tienda</html>'); return; }
+      if (u.pathname === '/api/catalog_system/pub/products/search') { const f = Number(u.searchParams.get('_from')), t = Number(u.searchParams.get('_to')); res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(all.slice(f, t + 1).map((p) => ({ productId: String(p.id), productName: p.title, description: p.body_html, link: 'http://127.0.0.1:' + port + '/' + p.handle + '/p', categories: ['/Bolsos/' + p.product_type + '/'], items: [{ itemId: String(p.id), sellers: [{ commertialOffer: { Price: sale(p), ListPrice: list(p), AvailableQuantity: 5 } }] }] })))); return; }
+    }
+    if (mode === 'woo' || mode === 'woo_usd') {
+      if (u.pathname === '/wp-json/wc/store/v1/products') { const pg = Number(u.searchParams.get('page') || 1), per = 25; const k = mode === 'woo_usd' ? 1 / 4000 : 1; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(all.slice((pg - 1) * per, pg * per).map((p) => ({ id: p.id, name: p.title, permalink: 'http://127.0.0.1:' + port + '/p/' + p.handle, short_description: p.body_html, categories: [{ name: p.product_type }], prices: { price: String(Math.round(sale(p) * k * 100)), regular_price: String(Math.round(list(p) * k * 100)), currency_code: mode === 'woo_usd' ? 'USD' : 'COP', currency_minor_unit: 2 } })))); return; }
+      if (u.pathname === '/') { res.setHeader('Content-Type', 'text/html'); res.end('<html lang="es"><link rel="stylesheet" href="/wp-content/plugins/woocommerce/a.css">Tienda</html>'); return; }
+    }
+    if (mode === 'woo_auth' && u.pathname === '/wp-json/wc/v3/products') {
+      if (req.headers.authorization !== 'Basic ' + Buffer.from('ck_' + 'a'.repeat(24) + ':cs_' + 'b'.repeat(24)).toString('base64')) { res.statusCode = 401; res.end('{}'); return; }
+      const pg = Number(u.searchParams.get('page') || 1), per = 100; res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify(all.slice((pg - 1) * per, pg * per).map((p) => ({ id: p.id, name: p.title, permalink: 'http://127.0.0.1:' + port + '/p/' + p.handle, regular_price: String(list(p)), sale_price: list(p) > sale(p) ? String(sale(p)) : '', price: String(sale(p)), categories: [{ name: p.product_type }], sku: p.variants[0].sku, stock_status: 'instock' })))); return;
+    }
+    if (mode === 'partial' && u.pathname === '/products.json' && Number(u.searchParams.get('page') || 1) >= 2) { res.statusCode = 500; res.end('error'); return; }
+    if (mode === 'dynamic') {
+      res.setHeader('Content-Type', 'text/html');
+      if (u.pathname === '/') { res.end('<html lang="es"><body><nav id="n"></nav><script>document.getElementById("n").innerHTML=' + JSON.stringify(all.slice(0, 8).map((p) => '<a href="/item/' + p.handle + '">' + p.title.split(" ")[0] + ' ' + p.id + '</a>').join(' ')) + '</script></body></html>'); return; }
+      const m = u.pathname.match(/^\/item\/(p-\d+|llavero)$/);
+      if (m) { const p = all.find((x) => x.handle === m[1]); const ld = { '@context': 'https://schema.org', '@type': 'Product', name: p.title, sku: p.variants[0].sku, offers: { '@type': 'Offer', price: sale(p), priceCurrency: 'COP' } }; res.end('<html><body><h1 id="t"></h1><script>var s=document.createElement("script");s.type="application/ld+json";s.text=' + JSON.stringify(JSON.stringify(ld)) + ';document.head.appendChild(s);document.getElementById("t").textContent=' + JSON.stringify(p.title) + '</script></body></html>'); return; }
+      res.statusCode = 404; res.end('no'); return;
+    }
+    if (mode === 'noprice') {
+      if (u.pathname === '/sitemap.xml') { res.end('<urlset>' + all.slice(0, 12).map((p) => '<url><loc>http://127.0.0.1:' + port + '/products/' + p.handle + '</loc></url>').join('') + '</urlset>'); return; }
+      const m = u.pathname.match(/^\/products\/(p-\d+|llavero)$/);
+      if (m) { const p = all.find((x) => x.handle === m[1]); res.setHeader('Content-Type', 'text/html'); res.end('<html><script type="application/ld+json">' + JSON.stringify({ '@context': 'https://schema.org', '@type': 'Product', name: p.title, sku: p.variants[0].sku }) + '</script><body>Consulta el precio con un asesor</body></html>'); return; }
+      if (u.pathname === '/') { res.setHeader('Content-Type', 'text/html'); res.end('<html lang="es">Tienda sin precios</html>'); return; }
+    }
+    if (['vtex', 'woo', 'woo_usd', 'dynamic', 'noprice'].includes(mode)) { res.statusCode = 404; res.end('no'); return; }
     // Modo 'ld': sin API pública (robots la bloquea); solo sitemap y páginas con datos estructurados schema.org
     if (mode === 'ld') {
       if (u.pathname === '/robots.txt') { res.end('User-agent: *\nDisallow: /api/\nDisallow: /products.json\nSitemap: http://127.0.0.1:' + port + '/sitemap.xml\n'); return; }
@@ -51,6 +82,7 @@ function anthropic(port, log) {
   const srv = http.createServer((req, res) => {
     let body = ''; req.on('data', (c) => (body += c)); req.on('end', () => {
       const j = JSON.parse(body || '{}');
+      if (anthropic.failAll) { log.push({ fail: true }); res.statusCode = 529; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } })); return; }
       log.push({ path: req.url, model: j.model, beta: req.headers['anthropic-beta'], fallbacks: j.fallbacks, effort: j.output_config && j.output_config.effort, tools: (j.tools || []).length });
       const last = j.messages[j.messages.length - 1];
       const text = typeof last.content === 'string' ? last.content : last.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n');

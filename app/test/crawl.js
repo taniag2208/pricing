@@ -1,6 +1,6 @@
 // Prueba del lector de catálogos: API de Shopify, y sitemap + datos estructurados cuando robots.txt bloquea la API.
 const mocks = require('./mocks');
-process.env.CRAWLER_DELAY_MS = '5';
+process.env.CRAWLER_DELAY_MS = '5'; process.env.ALLOW_PRIVATE_NETWORK = '1'; process.env.LOG_SILENT = '1';
 const { crawl } = require('../server/scrape');
 (async () => {
   const a = await mocks.store(4401, 'Api', 30, 0, 0), b = await mocks.store(4402, 'Ld', 30, 0, 0, 'ld');
@@ -8,8 +8,8 @@ const { crawl } = require('../server/scrape');
   const rb = await crawl('http://127.0.0.1:4402');
   const promo = rb.items.filter((x) => x.promo).length;
   const rk = await crawl('http://127.0.0.1:4402', null, { keywords: ['llavero'] });
-  const ok = ra.platform === 'Shopify' && ra.items.length === 31 && /Sitemap/.test(rb.platform) && rb.items.length === 31 && rb.items.every((x) => x.price > 0 && x.label) && promo > 0 && rk.items.length === 31;
-  console.log('api:', ra.platform, ra.items.length, '· sitemap:', rb.platform, rb.items.length, 'promos', promo, 'label', rb.items[0].label, '· filtro por palabra (<10 coincidencias → muestra completa):', rk.items.length);
+  const ok = ra.platform === 'Shopify' && ra.items.length === 31 && rb.method === 'sitemap' && rb.items.length === 31 && rb.items.every((x) => x.price > 0 && x.label) && promo > 0 && rk.items.length === 31;
+  console.log('api:', ra.platform, ra.items.length, '· sitemap:', rb.method, rb.items.length, 'promos', promo, 'label', rb.items[0].label, '· filtro por palabra (<10 coincidencias → muestra completa):', rk.items.length);
   const rk2 = await crawl('http://127.0.0.1:4401', null, { keywords: ['tote'] });
   console.log('filtro API "tote":', rk2.items.length, 'de 31');
   const red = require('http').createServer((q, r) => { r.statusCode = 301; r.setHeader('Location', 'http://127.0.0.1:4401' + q.url); r.end(); }); await new Promise((r) => red.listen(4403, r));

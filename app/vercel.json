@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "npm ci --omit=dev",
+  "installCommand": "npm ci --omit=dev && (npm i --no-save --omit=dev https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz || echo 'xlsx: CDN de SheetJS no disponible; se mantiene la versión del lockfile')",
   "buildCommand": "node scripts/vendor.js",
   "outputDirectory": "web",
   "functions": {
