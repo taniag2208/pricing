@@ -59,8 +59,9 @@ async function audit(page) {
   await page.waitForSelector('text=Confirma tu mercado', { timeout: 60000 });
   await all('2-confirmar');
   await page.click('button:has-text("Analizar con")');
-  await page.waitForSelector('text=Configura tu estrategia', { timeout: 60000 });
-  await all('3-estrategia');
+  await page.waitForSelector('.procrow.run', { timeout: 60000 });
+  await page.waitForSelector('text=Configura tu estrategia', { timeout: 90000 }).catch(() => {});
+  await all('3-fases');
   await page.waitForSelector('text=¿Qué está pasando con tus precios?', { timeout: 120000 });
   await all('4-overview');
   await page.click('.side >> text=Pricing Advisor'); await page.waitForSelector('.advgrid tbody tr'); await page.click('.advgrid tbody tr >> nth=0'); await page.waitForSelector('.decision');

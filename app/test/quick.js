@@ -23,7 +23,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   page.on('pageerror', (e) => out.push('PAGEERR ' + e.message));
   const step = async (n, fn) => { try { await fn(); } catch (e) { out.push('STEP ' + n + ': ' + e.message.split('\n')[0]); await page.screenshot({ path: path.join(OUT, 'fail-' + n.replace(/\W+/g, '_') + '.png') }).catch(() => {}); } };
   await page.goto('http://localhost:4310/');
-  await step('landing', () => page.waitForSelector('text=Tu catálogo frente a tu mercado'));
+  await step('landing', () => page.waitForSelector('text=Descubre oportunidades de rentabilidad'));
   await page.screenshot({ path: path.join(OUT, 'q1-landing.png') });
   await step('submit', async () => { await page.fill('#q-url', 'http://127.0.0.1:4101'); await page.click('button:has-text("Analizar")'); await page.waitForSelector('text=Analizando'); });
   await sleep(1500); await page.screenshot({ path: path.join(OUT, 'q2-progress.png') });

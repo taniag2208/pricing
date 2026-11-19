@@ -166,7 +166,7 @@
     </div>`;
   }
 
-  /* ---------- paso 1: el link ---------- */
+  /* ---------- el link (como en la primera versión: formulario simple y centrado) ---------- */
   function QuickLanding({ onStarted, onLogin }) {
     const [url, setUrl] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
     const go = async (e) => {
@@ -174,28 +174,51 @@
       try { const r = await L.api('POST', '/quick', { url }); saveTok(r.org, r.token); onStarted(r.org); }
       catch (x) { setErr(x.message); setBusy(false); }
     };
-    return html`<div className="land">
-      <header className="land-top"><div className="brand"><img src="/brand/tita-mark.svg" alt="" width="28" height="28" /><span className="wm">TITA MEDIA</span><span className="prod">Pricing Intelligence 360°</span></div><button type="button" className="linkbtn sm" onClick=${onLogin}>Ingreso equipo Tita</button></header>
-      <section className="land-hero"><div className="land-in">
-        <p className="eyebrow">Pricing intelligence · Retail · IA</p>
-        <h1>Tu catálogo frente a tu mercado, con evidencia.</h1>
-        <p className="lead">Pega el link de tu tienda online. Un agente de IA lee tu catálogo, encuentra a tus competidores, compara productos equivalentes y te muestra dónde estás caro, dónde estás barato y qué espacios del mercado no estás cubriendo.</p>
-        <form className="urlform" onSubmit=${go}>
-          <label htmlFor="q-url" className="sr">Dirección de la tienda</label>
-          <div className="urlrow"><${Icon} n="store" /><input id="q-url" type="text" inputMode="url" autoComplete="url" placeholder="https://mitienda.com" value=${url} onInput=${(e) => setUrl(e.target.value)} /><button className="btn primary" type="submit" disabled=${busy || !url.trim()}>${busy ? 'Preparando…' : 'Analizar'}<${Icon} n="arrow" /></button></div>
-          ${err ? html`<div className="err" role="alert">${err}</div>` : null}
-        </form>
-        <ol className="land-steps">${STEPS.map((t, i) => html`<li key=${i}><span className="mono">${String(i + 1).padStart(2, '0')}</span>${t}</li>`)}</ol>
-      </div></section>
-      <section className="land-facts"><div className="land-in"><ul>
-        <li><b>Solo información pública</b><span>Productos, precios y fichas publicados. Respetamos robots.txt y no evadimos protecciones.</span></li>
-        <li><b>Shopify, VTEX, WooCommerce y más</b><span>Si tu tienda no publica su catálogo, puedes subir un archivo o conectarla con credenciales de lectura.</span></li>
-        <li><b>Recomendaciones con evidencia</b><span>Cada sugerencia muestra con qué productos se compara y qué tan confiable es. Si no hay evidencia, no recomendamos.</span></li>
-      </ul></div></section>
-    </div>`;
+    return html`<div className="ob"><div className="ob-in">
+      <div className="row-between"><div className="brand"><img src="/brand/tita-mark.svg" alt="" width="28" height="28" /><span className="wm">TITA MEDIA</span><span className="prod">Pricing Intelligence 360°</span></div><button type="button" className="linkbtn sm" onClick=${onLogin}>Ingreso equipo Tita</button></div>
+      <p className="eyebrow">Pricing intelligence · Retail · IA</p>
+      <h1>Descubre oportunidades de rentabilidad en tu catálogo.</h1>
+      <p className="lead">Pega el link de una tienda online. Leemos su catálogo público, la IA encuentra a sus competidores, compara productos equivalentes y te mostramos dónde está caro, dónde está barato y qué espacios del mercado no está cubriendo.</p>
+      <form className="urlform" onSubmit=${go}>
+        <label htmlFor="q-url">Dirección de la tienda</label>
+        <div className="urlrow"><${Icon} n="store" /><input id="q-url" type="text" inputMode="url" autoComplete="url" placeholder="https://mitienda.com" value=${url} onInput=${(e) => setUrl(e.target.value)} /><button className="btn primary" type="submit" disabled=${busy || !url.trim()}>${busy ? 'Preparando…' : 'Analizar'}<${Icon} n="arrow" /></button></div>
+        ${err ? html`<div className="err" role="alert">${err}</div>` : null}
+        <div className="hint">Funciona con Shopify, VTEX, WooCommerce y la mayoría de tiendas que publican sus productos. Si tu tienda no se puede leer, podrás subir un archivo o conectarla. El análisis toma entre 5 y 10 minutos y queda disponible 7 días.</div>
+      </form>
+      <ul className="checks"><li className="ok"><${Icon} n="check" s=${14} />Solo usamos información pública de las tiendas: productos, precios y fichas. Respetamos robots.txt.</li><li className="ok"><${Icon} n="check" s=${14} />Sin registro ni configuración.</li><li className="ok"><${Icon} n="check" s=${14} />Cada recomendación muestra su evidencia; si no hay evidencia, no recomendamos.</li></ul>
+    </div></div>`;
   }
 
-  /* ---------- pasos 2 a 5 ---------- */
+  /* ---------- fases del análisis (estado real del trabajo en el servidor) ---------- */
+  const PHASES = [['own', 'Leyendo el catálogo de la tienda'], ['discover', 'Buscando competidores en la web'], ['confirm', 'Confirmando tus competidores'], ['comps', 'Leyendo el catálogo de los competidores'], ['cats', 'Proponiendo categorías y atributos'], ['classify', 'Clasificando productos con IA'], ['done', 'Construyendo el análisis']];
+  const PHASE_IDX = { own: 0, need_own: 0, discover: 1, confirm_comps: 2, need_comps: 2, comps: 3, cats: 4, classify: 5, done: 6 };
+  function phaseDetail(p) {
+    const d = p.ownDiag || {};
+    const comps = p.comps || [];
+    const read = comps.filter((c) => c.read && (c.read.status === 'ok' || c.read.status === 'partial'));
+    const failed = comps.filter((c) => c.read && c.read.status === 'failed');
+    return {
+      own: p.own != null ? fmtN(p.own) + ' productos tomados para el análisis' + (p.ownTotal > p.own ? ' (de ' + fmtN(p.ownTotal) + ' leídos)' : '') + (d.methodLabel ? ' · ' + d.methodLabel : '') + (d.currency ? ' · ' + d.currency : '')
+        : p.phase === 'need_own' ? (OWN_REASON[p.reason] || OWN_REASON[p.code] || 'No pudimos leer el catálogo')
+        : d.stage ? STAGE[d.stage] + (d.platform ? ' · ' + d.platform : '') + (d.found ? ' · ' + fmtN(d.found) + ' productos' : '') : '',
+      discover: p.candidates ? p.candidates.length + ' candidatos: ' + p.candidates.slice(0, 6).map((c) => c.name).join(', ') + (p.candidates.length > 6 ? '…' : '') : p.discoverError || '',
+      confirm: comps.length ? comps.length + ' competidores confirmados' : p.phase === 'confirm_comps' ? 'Esperando tu confirmación' : '',
+      comps: comps.length ? [read.length ? read.map((c) => c.name + ' (' + fmtN(c.read.related) + ')').join(', ') : '', failed.length ? failed.length + ' sin leer: ' + failed.map((c) => c.name).join(', ') : '', comps.some((c) => ['pending', 'reading'].includes((c.read || {}).status)) ? 'leyendo ' + comps.filter((c) => ['pending', 'reading'].includes((c.read || {}).status)).length + ' de ' + comps.length + '…' : ''].filter(Boolean).join(' · ') : '',
+      cats: p.cats ? p.cats.join(', ') : '',
+      classify: p.classified != null ? fmtN(p.classified) + ' clasificados · ' + fmtN(p.left || 0) + ' en cola' : '',
+      done: '',
+    };
+  }
+  function Phases({ p, status }) {
+    const cur = PHASE_IDX[p.phase || 'own'] ?? 0;
+    const waiting = status === 'waiting', failed = status === 'failed';
+    const det = phaseDetail(p);
+    return html`<ol className="proc" aria-label="Fases del análisis">${PHASES.map(([k, t], i) => {
+      const cls = i < cur ? 'done' : i === cur ? (waiting ? 'wait' : failed ? 'fail' : 'run') : '';
+      return html`<li key=${k} className=${'procrow ' + cls} aria-current=${i === cur ? 'step' : undefined}><span className="st">${i < cur ? html`<${Icon} n="check" s=${12} />` : i === cur && waiting ? '!' : i === cur && failed ? html`<${Icon} n="x" s=${12} />` : ''}</span><b>${t}</b><span className="res">${det[k] || (i === cur && waiting ? 'Necesitamos tu respuesta' : '')}</span></li>`;
+    })}</ol>`;
+  }
+
   function QuickGate({ org, me, children, onReset }) {
     const [st, setSt] = useState(undefined);
     const [kick, setKick] = useState(0);
@@ -215,30 +238,25 @@
     if (st && st.status === 'done') return children;
     const p = (st && st.progress) || {};
     const phase = p.phase || 'own';
-    const cur = stepOf(phase);
     const again = (patch) => { setSt({ status: 'queued', progress: { ...p, ...patch } }); setKick((x) => x + 1); };
     const waiting = st && st.status === 'waiting';
+    const failed = st && st.status === 'failed';
+    const name = p.storeName || (me.org && me.org.name) || 'la tienda';
     const title = waiting ? (phase === 'need_own' ? (p.countries ? 'Elige el país de la tienda' : 'Necesitamos tu ayuda con el catálogo') : phase === 'confirm_comps' ? 'Confirma tu mercado' : '¿Quiénes son tus competidores?')
-      : st && st.status === 'failed' ? 'No pudimos completar el análisis' : ['', 'Estamos explorando tu catálogo', 'Estamos leyendo tu mercado', 'Clasificando productos y atributos', 'Preparando tus oportunidades'][cur];
-    let body;
-    if (waiting && phase === 'need_own') body = html`<${OwnRecovery} org=${org} p=${p} onReset=${onReset} onSent=${() => again({ phase: 'discover' })} onRetry=${() => again({ phase: 'own', ownDiag: null })} />`;
-    else if (waiting) body = html`<${CompetitorConfirm} key=${phase + (p.candidates || []).length} org=${org} p=${p} onReset=${onReset} onSent=${() => again({ phase: 'comps' })} />`;
-    else if (st && st.status === 'failed') body = html`<div className="sheet"><${Note} tone="warn">${st.error}<//><div className="ob-actions"><button className="btn primary" type="button" onClick=${onReset}>Analizar otra tienda</button></div></div>`;
-    else if (cur <= 1) body = html`<${ConnectionDiagnosis} d=${p.ownDiag} live=${true} title=${me.org ? me.org.name : 'Tu tienda'} />`;
-    else body = html`<div className="grid-main">
-      <div className="col">
-        ${p.ownDiag ? html`<${ConnectionDiagnosis} d=${p.ownDiag} title=${p.storeName || (me.org && me.org.name) || 'Tu tienda'} />` : null}
-        ${phase === 'discover' ? html`<section className="sheet live"><span className="spin"></span><div><b>Buscando competidores en la web</b><p className="sm muted">Dos búsquedas independientes más las tiendas que ya verificamos en otros análisis. Luego confirmamos que cada dominio exista.</p></div></section>` : null}
-        ${p.comps && p.comps.length ? html`<section className="sheet"><h3>Tu mercado</h3><${CompetitorBoard} comps=${p.comps} org=${org} compact=${phase === 'comps'} /></section>` : null}
-        ${cur >= 3 ? html`<section className="sheet live"><span className="spin"></span><div><b>${phase === 'cats' ? 'Proponiendo categorías y atributos comparables' : 'Clasificando productos con IA'}</b><p className="sm muted">${p.cats ? 'Categorías: ' + p.cats.join(', ') + '. ' : ''}${p.classified != null ? fmtN(p.classified) + ' productos clasificados · ' + fmtN(p.left || 0) + ' en cola' : ''}</p></div></section>` : null}
-      </div>
-      <div className="col">${cur >= 2 ? html`<section className="sheet-h"><span className="eyebrow">Paso 4</span><h3>Configura tu estrategia</h3></section><${StrategyForm} org=${org} initial=${p.strategy} />` : null}</div>
-    </div>`;
+      : failed ? 'No pudimos completar el análisis' : 'Analizando ' + name + '…';
+    let action = null;
+    if (waiting && phase === 'need_own') action = html`<${OwnRecovery} org=${org} p=${p} onReset=${onReset} onSent=${() => again({ phase: 'discover' })} onRetry=${() => again({ phase: 'own', ownDiag: null })} />`;
+    else if (waiting) action = html`<${CompetitorConfirm} key=${phase + (p.candidates || []).length} org=${org} p=${p} onReset=${onReset} onSent=${() => again({ phase: 'comps' })} />`;
+    else if (failed) action = html`<div className="sheet"><${Note} tone="warn">${st.error}<//><div className="ob-actions"><button className="btn primary" type="button" onClick=${onReset}>Analizar otra tienda</button></div></div>`;
+    const showStrategy = !waiting && !failed && (PHASE_IDX[phase] || 0) >= 3;
     return html`<div className="ob"><div className="ob-in wide">
       <div className="ob-top"><div className="brand"><img src="/brand/tita-mark.svg" alt="" width="24" height="24" /><span className="wm">TITA MEDIA</span><span className="prod">Pricing Intelligence 360°</span></div><span className="muted sm">Puedes dejar esta pestaña abierta: el análisis avanza mientras la ves.</span></div>
-      <${Stepper} cur=${cur} />
       <div className="ob-head"><h2>${title}</h2></div>
-      ${body}
+      <${Phases} p=${p} status=${st && st.status} />
+      ${action}
+      ${showStrategy ? html`<details className="sheet strat" open><summary><span className="eyebrow">Mientras terminamos</span><h3>Configura tu estrategia</h3></summary><${StrategyForm} org=${org} initial=${p.strategy} /></details>` : null}
+      ${p.comps && p.comps.length && !waiting ? html`<details className="sheet"><summary><h3>Tus competidores</h3></summary><${CompetitorBoard} comps=${p.comps} org=${org} compact=${phase === 'comps'} /></details>` : null}
+      ${p.ownDiag && !(waiting && phase === 'need_own') ? html`<details className="sheet"><summary><h3>Diagnóstico de conexión de tu tienda</h3></summary><${ConnectionDiagnosis} d=${p.ownDiag} title=${name} live=${phase === 'own'} /></details>` : null}
     </div></div>`;
   }
 
