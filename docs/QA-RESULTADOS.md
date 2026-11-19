@@ -1,6 +1,6 @@
 # Resultados de la batería de QA
 
-Generado por `node test/battery.js` el 2026-11-19 13:39 UTC, con servidores de prueba controlados (no tiendas reales).
+Generado por `node test/battery.js` el 2026-11-19 18:57 UTC, con servidores de prueba controlados (no tiendas reales).
 
 | Id | Caso | Esperado | Obtenido | Método | Productos válidos | Motivo o limitación | Tiempo | Llamadas a IA | Estado |
 |---|---|---|---|---|---|---|---|---|---|
@@ -22,7 +22,7 @@ Generado por `node test/battery.js` el 2026-11-19 13:39 UTC, con servidores de p
 | C13 | Monedas diferentes (USD frente a COP) | no comparable sin tasa de cambio, se conserva como referencia | tipo directo · comparabilidad no_comparable · en análisis: no · evidencia 0.78 | api_woocommerce | 30 | Se conserva como referencia: otra moneda. | 0.0 s | 0 | Aprobado |
 | J14 | Trabajo interrumpido | otro proceso retoma el trabajo vencido; la lectura cortada queda como pendiente y el análisis termina | estado done · 127.0.0.1: failed, 127.0.0.1: ok, 127.0.0.1: failed | lease vencido + claim | 1 | la lectura se interrumpió por tiempo | 2.5 s | 6 | Aprobado |
 | J15 | Reintento de lectura (solo las fallidas) | se reintentan solo las fallidas; las que ahora responden entran al análisis | reintentadas 2 · 127.0.0.1: ok, 127.0.0.1: ok, 127.0.0.1: ok · estado done | /retry | 3 | — | 0.7 s | 3 | Aprobado |
-| J16 | Error de API de IA (sobrecarga en todas las llamadas) | el catálogo se lee igual (no usa IA); la búsqueda web informa el error y el análisis espera al usuario con lo que hay (registro de tiendas verificadas o competidores a mano), sin caerse | estado waiting · fase confirm_comps · La búsqueda web no respondió; puedes agregar competidores a mano. | api_woocommerce | 41 | La búsqueda web no respondió; puedes agregar competidores a mano. | 2.0 s | 6 | Aprobado |
+| J16 | Error de API de IA (sobrecarga en todas las llamadas) | el catálogo se lee igual (no usa IA); la búsqueda web informa el error y el análisis espera al usuario con lo que hay (registro de tiendas verificadas o competidores a mano), sin caerse | estado waiting · fase confirm_comps · La búsqueda web no respondió; puedes agregar competidores a mano. | api_woocommerce | 41 | La búsqueda web no respondió; puedes agregar competidores a mano. | 2.1 s | 6 | Aprobado |
 
 **19 de 19 casos aprobados.**
 

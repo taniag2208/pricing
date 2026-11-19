@@ -1,4 +1,4 @@
-// TITA Pricing Intelligence 360° — servidor HTTP.
+// Tita Pricing Intelligence 360° — servidor HTTP.
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
@@ -443,7 +443,7 @@ if (require.main === module) {
   bootstrap().then(() => {
     jobs.start();
     const port = Number(process.env.PORT || 3000);
-    app.listen(port, () => console.log('TITA Pricing Intelligence escuchando en el puerto ' + port));
+    app.listen(port, () => console.log('Tita Pricing Intelligence escuchando en el puerto ' + port));
   }).catch((e) => { console.error(e); process.exit(1); });
 }
 module.exports = { app, bootstrap };

@@ -1,4 +1,4 @@
-/* TITA Pricing Intelligence 360° — motor analítico. Corre en el navegador sobre los datos
+/* Tita Pricing Intelligence 360° — motor analítico. Corre en el navegador sobre los datos
    reales del espacio de trabajo (catálogos importados y clasificados). */
 (function () {
   'use strict';

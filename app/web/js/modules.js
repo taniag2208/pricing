@@ -1,4 +1,4 @@
-/* TITA Pricing Intelligence 360° — Pricing Advisor, Simulador de lanzamiento, Simulador de promociones, Pulse WTP,
+/* Tita Pricing Intelligence 360° — Pricing Advisor, Simulador de lanzamiento, Simulador de promociones, Pulse WTP,
    Revenue Learning y Configuración, sobre los datos reales del espacio de trabajo. */
 (function () {
   'use strict';
@@ -36,7 +36,7 @@
       ${!m.ok ? html`<${Note} tone="warn"><b>Sin estimación del modelo en ${cat.name}.</b> ${m.reason === 'muestra' ? `Hay ${m.n} productos comparables y se necesitan ${m.need} para ${m.k} atributos.` : 'La validación cruzada no alcanza la calidad mínima.'} Las sugerencias usan solo comparables directos. <button className="linkbtn" type="button" onClick=${() => go('advisor', { sub: 'modelo' })}>Ver qué falta</button><//>` : null}
       <div className="sumrow">${[['all', 'Todos', all.length], ['below', 'Por debajo', cnt('below')], ['above', 'Por encima', cnt('above')], ['in', 'En banda', cnt('in')], ['na', 'Sin estimación', cnt('na')]].map(([k, l, n]) => html`<button key=${k} type="button" className=${'sumc ' + (pos === k ? 'on' : '')} onClick=${() => setPos(k)}><b>${n}</b><span>${l}</span></button>`)}</div>
       ${all.length ? html`<div className="advgrid">
-        <section className="panel"><div className="tw"><table className="tbl"><thead><tr><th>Producto</th><th className="num">Actual</th><th className="num">Estimado</th><th className="num">Brecha</th><th>Sugerencia</th>${hasSt ? html`<th className="num">Rotación</th>` : null}</tr></thead><tbody>
+        <section className="panel" data-tour="advisor-list"><div className="tw"><table className="tbl"><thead><tr><th>Producto</th><th className="num">Actual</th><th className="num">Estimado</th><th className="num">Brecha</th><th>Sugerencia</th>${hasSt ? html`<th className="num">Rotación</th>` : null}</tr></thead><tbody>
           ${rows.map((d) => html`<tr key=${d.p.id} className=${'click ' + (sel && sel.p.id === d.p.id ? 'sel' : '')} tabIndex="0" onClick=${() => setFocus(d.p.id)} onKeyDown=${(e) => e.key === 'Enter' && setFocus(d.p.id)}>
             <td><div className="pcell"><${Thumb} p=${d.p} size=${32} /><div><b>${d.p.name}</b><small>${d.p.typ} · ${d.p.mat}</small></div></div></td>
             <td className="num">${TP.fmt(d.p.list, E.mk)}</td><td className="num">${d.est ? TP.fmt(d.est, E.mk) : '—'}</td>
@@ -91,20 +91,20 @@
     const over = Math.abs(rp / p.list - 1) > pol.maxChange + 0.005;
     return html`<aside className="panel detail" aria-label="Detalle del producto">
       <div className="dhead"><${Thumb} p=${p} size=${64} /><div><span className="eyebrow">${cat.name}${p.collection ? ' · ' + p.collection : ''}</span><h2>${p.name}</h2><div className="muted">${p.typ} · ${p.mat} · ${p.color}${p.url ? html` · <a href=${p.url} target="_blank" rel="noopener noreferrer">ver en la tienda</a>` : null}</div><div className="dbadges"><${Badge} tone=${A.POS[d.pos].tone}>${A.POS[d.pos].t}<//><${Badge} tone=${d.evidence === 'consistente' ? 'ok' : 'warn'}>Evidencia ${d.evidence}<//>${p.imputed ? html`<${Badge} tone="warn">${p.imputed} atributo(s) sin dato<//>` : null}</div></div></div>
-      <dl className="decision" aria-label="Ficha de decisión">
-        <div><dt>Precio actual</dt><dd className="big">${TP.fmt(p.list, mk)}</dd></div>
-        <div><dt>Precio propuesto ${proposed ? html`<span className="kind">escenario</span>` : null}</dt><dd className="big">${proposed ? TP.fmt(proposed, mk) + ' (' + TP.pct(proposed / p.list - 1, 1) + ')' : html`<span className="muted">${d.evidence === 'insuficiente' ? 'Sin recomendación' : 'Mantener'}</span>`}</dd></div>
-        <div className="wide"><dt>Evidencia ${d.est ? html`<span className="kind">estimación estadística</span>` : null}</dt><dd>${evid}</dd></div>
-        <div><dt>Confianza</dt><dd><${Badge} tone=${conf[1]}>${conf[0]}<//> <span className="sm muted">${conf[2]}</span></dd></div>
-        <div><dt>Impacto estimado</dt><dd className="sm">${hasCost && proposed ? html`<span className="kind">cálculo</span> margen unitario ${TP.pct(marg(p.list), 1, false)} → ${TP.pct(marg(proposed), 1, false)}. ` : ''}${'Volumen y ventas: no estimados (requieren ventas históricas o un experimento en Revenue Learning).'}</dd></div>
-        ${missing.length ? html`<div className="wide"><dt>Datos que faltan</dt><dd><ul className="missing">${missing.map((x, i) => html`<li key=${i}>${x}</li>`)}</ul></dd></div>` : null}
+      <dl className="decision" aria-label="Ficha de decisión" data-tour="decision">
+        <div><dt>Precio actual <${TP.guide.Help} k="a_current" /></dt><dd className="big">${TP.fmt(p.list, mk)}</dd></div>
+        <div><dt>Precio propuesto <${TP.guide.Help} k="a_proposed" /> ${proposed ? html`<span className="kind">escenario</span>` : null}</dt><dd className="big">${proposed ? TP.fmt(proposed, mk) + ' (' + TP.pct(proposed / p.list - 1, 1) + ')' : html`<span className="muted">${d.evidence === 'insuficiente' ? 'Sin recomendación' : 'Mantener'}</span>`}</dd></div>
+        <div className="wide"><dt>Evidencia <${TP.guide.Help} k="a_evidence" /> ${d.est ? html`<span className="kind">estimación estadística</span>` : null}</dt><dd>${evid}</dd></div>
+        <div><dt>Confianza <${TP.guide.Help} k="a_conf" /></dt><dd><${Badge} tone=${conf[1]}>${conf[0]}<//> <span className="sm muted">${conf[2]}</span></dd></div>
+        <div><dt>Impacto estimado <${TP.guide.Help} k="a_impact" /></dt><dd className="sm">${hasCost && proposed ? html`<span className="kind">cálculo</span> margen unitario ${TP.pct(marg(p.list), 1, false)} → ${TP.pct(marg(proposed), 1, false)}. ` : ''}${'Volumen y ventas: no estimados (requieren ventas históricas o un experimento en Revenue Learning).'}</dd></div>
+        ${missing.length ? html`<div className="wide"><dt>Datos que faltan <${TP.guide.Help} k="a_missing" /></dt><dd><ul className="missing">${missing.map((x, i) => html`<li key=${i}>${x}</li>`)}</ul></dd></div>` : null}
       </dl>
-      <${UI.PriceStrip} mk=${mk} current=${p.list} est=${d.est} lo=${d.lo} hi=${d.hi} comps=${d.comps.map((c) => c.q.list)} floor=${d.floor} wtp=${study && study.result.range} extra=${rp !== p.list ? [{ v: rp, t: 'Escenario', cls: 'scn', y: 16 }] : []} />
+      <div data-tour="strip"><${UI.PriceStrip} mk=${mk} current=${p.list} est=${d.est} lo=${d.lo} hi=${d.hi} comps=${d.comps.map((c) => c.q.list)} floor=${d.floor} wtp=${study && study.result.range} extra=${rp !== p.list ? [{ v: rp, t: 'Escenario', cls: 'scn', y: 16 }] : []} /></div>
       <div className="why"><h3><${Icon} n="spark" />Por qué</h3><p>${text}</p></div>
       ${d.comps.length ? html`<div><h3>Comparables usados</h3><ul className="cp-list">${d.comps.map((c) => html`<li key=${c.q.id}><span><b>${c.q.name}</b> · ${A.brandName(E, c.q.brand)} · ${TP.fmt(c.q.list, mk)} · ${c.s.label}${c.q.url ? html` · <a href=${c.q.url} target="_blank" rel="noopener noreferrer">ver</a>` : null}${c.s.why ? html`<small className="muted" style=${{ display: 'block' }}>${c.s.why.join(' · ')}</small>` : null}</span></li>`)}</ul></div>` : null}
       ${dx ? html`<div className="dx"><b>${dx[0]}</b> · rotación ${Math.round(p.st * 100)} % (vendido sobre planeado) · ${dx[1]}</div>` : null}
       ${contrib.length ? html`<div><h3>Qué explica el estimado</h3><p className="muted sm">Efecto de cada atributo frente al producto promedio de la categoría.</p><div className="contrib">${contrib.map((c) => html`<div key=${c.attr.id} className="cbr"><span>${c.attr.name} <em>nivel ${c.level}</em></span><div className="ctrack"><div className="czero"></div><div className=${'cbar ' + (c.eff < 0 ? 'neg' : '')} style=${{ left: c.eff >= 0 ? '50%' : 50 + (c.eff / cmx) * 50 + '%', width: (Math.abs(c.eff) / cmx) * 50 + '%' }}></div></div><b>${TP.pct(c.eff)}</b></div>`)}</div></div>` : null}
-      <div className="scen"><h3>Escenario</h3>
+      <div className="scen" data-tour="scenario"><h3>Escenario</h3>
         <label className="fld" htmlFor="sc-price"><span>Precio a evaluar: <b>${TP.fmt(rp, mk)}</b> (${TP.pct(rp / p.list - 1, 1)} · redondeo: ${TP.ROUNDING[pol.rounding].toLowerCase()})</span><input id="sc-price" type="range" min=${lo} max=${hi} step=${(hi - lo) / 200} value=${price} onInput=${(e) => setPrice(+e.target.value)} /></label>
         <div className="kv sm">
           <div><span>Posición en banda</span><b>${d.est ? (rp < d.lo ? 'Debajo' : rp > d.hi ? 'Encima' : 'Dentro') : '—'}</b></div>

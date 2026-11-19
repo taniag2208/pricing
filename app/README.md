@@ -1,4 +1,4 @@
-# TITA Pricing Intelligence 360° — plataforma
+# Tita Pricing Intelligence 360° — plataforma
 
 Aplicación web multi-cliente de inteligencia de precios. Tita Media configura cada cuenta desde su consola; el cliente entra con su usuario y ve el análisis de su cuenta cuando Tita la publica.
 

@@ -29,10 +29,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(1500); await page.screenshot({ path: path.join(OUT, 'q2-progress.png') });
   await step('confirm', async () => { await page.waitForSelector('text=Confirma tu mercado', { timeout: 60000 }); await page.screenshot({ path: path.join(OUT, 'q2b-confirm.png') }); out.push('confirmación: ' + (await page.locator('.cand li').count()) + ' candidatos · sin verificar: ' + (await page.locator('.cand li:has-text("No respondió")').count()) + ' · marcados: ' + (await page.locator('.cand input:checked').count())); await page.click('button:has-text("Analizar con")'); });
   await step('done', () => page.waitForSelector('text=¿Qué está pasando con tus precios?', { timeout: 90000 }));
+  // Guía: se abre sola la primera vez, recorre los pasos y no vuelve a abrirse
+  await step('tour overview', async () => {
+    await page.waitForSelector('.tour-card', { timeout: 8000 });
+    await page.screenshot({ path: path.join(OUT, 'q3a-tour.png') });
+    const titles = [];
+    for (let i = 0; i < 12; i++) { titles.push(await page.locator('#tour-t').innerText()); const last = await page.locator('.tour-card button:has-text("Entendido")').count(); await page.click('.tour-card .btn.primary'); if (last) break; }
+    out.push('guía overview: ' + titles.length + ' pasos · ' + titles.join(' | '));
+    if (await page.locator('.tour-card').count()) throw new Error('la guía no se cerró');
+    const helps = await page.locator('.help-btn, button[aria-label^="Qué significa"]').count();
+    out.push('ayudas «?» en overview: ' + helps);
+  });
   await page.screenshot({ path: path.join(OUT, 'q3-overview.png') });
   out.push('aviso referencias: ' + (await page.locator('text=no entraron al análisis de precios').count()) + ' · pendientes: ' + (await page.locator('text=quedaron como referencia pendiente').count()) + ' · motivo escala: ' + (await page.locator('text=precios en otra escala o moneda').count()));
   out.push('guest nav: ' + (await page.locator('.side nav').innerText().catch(() => '')).replace(/\n+/g, ' | '));
-  await step('market', async () => { await page.click('.side >> text=Market Intelligence'); await page.waitForTimeout(600); });
+  await step('market', async () => { await page.click('.side >> text=Market Intelligence'); await page.waitForSelector('.tour-card', { timeout: 8000 }); out.push('guía market abierta: ' + (await page.locator('#tour-t').innerText())); await page.keyboard.press('Escape'); await page.waitForTimeout(300); if (await page.locator('.tour-card').count()) throw new Error('Esc no cerró la guía'); });
   await page.screenshot({ path: path.join(OUT, 'q4-market.png') });
   const checks = await page.evaluate(async () => {
     const me = await (await fetch('/api/me')).json();

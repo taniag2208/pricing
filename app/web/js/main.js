@@ -1,4 +1,4 @@
-/* TITA Pricing Intelligence 360° — copiloto (Claude con herramientas sobre los datos del espacio,
+/* Tita Pricing Intelligence 360° — copiloto (Claude con herramientas sobre los datos del espacio,
    con respaldo por reglas), shell de navegación y arranque. */
 (function () {
   'use strict';
@@ -96,7 +96,7 @@
       { name: 'ir_a_vista', description: 'Lleva al usuario a una vista de la plataforma. vista: overview, market, advisor, launch, promo, pulse, learning, data. sub (opcional) para market: homolog, valor, categoria, producto, escalera, rangos, piramide, territorios, whitespace, composicion, capsulas, transversal; para advisor: diagnostico, modelo, aprobacion.', inputSchema: { type: 'object', properties: { vista: { type: 'string' }, sub: { type: 'string' }, categoria: { type: 'string' }, posicion: { type: 'string' } }, required: ['vista'] }, execute: (i) => { const c = i.categoria ? catOf(i.categoria) : null; actions.go(String(i.vista), { sub: i.sub, cat: c ? c.id : undefined, pos: i.posicion }); return 'Vista abierta.'; } },
     ];
   }
-  const RULES = 'Eres el copiloto de pricing de la plataforma TITA Pricing Intelligence 360°, para equipos comerciales, de producto y de pricing. Responde en español, en 2 a 6 frases o una lista corta, con cifras concretas tomadas SOLO de las herramientas (no inventes datos; si no hay datos, dilo). Precios en la moneda del espacio. Recuerda cuando aplique: el precio estimado refleja lo que cobra el mercado por atributos similares; no es disposición a pagar ni precio óptimo, y un espacio con poca oferta no prueba que haya demanda. Si la respuesta tiene una vista que la respalda, usa ir_a_vista al final. No uses tablas Markdown.';
+  const RULES = 'Eres el copiloto de pricing de la plataforma Tita Pricing Intelligence 360°, para equipos comerciales, de producto y de pricing. Responde en español, en 2 a 6 frases o una lista corta, con cifras concretas tomadas SOLO de las herramientas (no inventes datos; si no hay datos, dilo). Precios en la moneda del espacio. Recuerda cuando aplique: el precio estimado refleja lo que cobra el mercado por atributos similares; no es disposición a pagar ni precio óptimo, y un espacio con poca oferta no prueba que haya demanda. Si la respuesta tiene una vista que la respalda, usa ir_a_vista al final. No uses tablas Markdown.';
   const md = (t) => t.split(/\n{2,}/).map((para, i) => html`<p key=${i}>${para.split(/(\*\*[^*]+\*\*)/).map((s, j) => (s.startsWith('**') ? html`<b key=${j}>${s.slice(2, -2)}</b>` : s.split('\n').map((l, k) => (k ? [html`<br key=${'b' + k} />`, l] : l))))}</p>`);
 
   function Copilot({ E, f, open, setOpen, msgs, setMsgs, actions }) {
@@ -202,6 +202,7 @@
     const [msgs, setMsgs] = useState([]);
     const [navOpen, setNavOpen] = useState(false);
     const [pubAsk, setPubAsk] = useState(false);
+    const [tour, setTour] = useState(null);
     useEffect(() => { const on = () => setRoute(hashRoute()); addEventListener('hashchange', on); return () => removeEventListener('hashchange', on); }, []);
     useEffect(() => { L.resetPeople(); }, [orgId]);
     const cfg = useMemo(() => ({ ...A.defaultConfig(), ...(ws.ws.config || {}) }), [ws.ws.config]);
@@ -211,10 +212,12 @@
     const E = useMemo(() => { if (!D) return null; const e = A.compute(D, cfg, dec); e.P = P; e.ws = ws; return e; }, [D, cfg, dec, ws.history]);
     const approvals = useMemo(() => Object.values(ws.approvals).sort((a, b) => (b.at || '').localeCompare(a.at || '')), [ws.approvals]);
     const studies = useMemo(() => Object.values(ws.studies).sort((a, b) => (b.at || '').localeCompare(a.at || '')), [ws.studies]);
+    // Recorrido guiado: se abre solo la primera vez que se visita cada vista con datos (luego, con el botón «Guía»).
+    useEffect(() => { if (!E || tour || !TP.guide.TOURS[route] || TP.guide.wasSeen(route)) return undefined; const t = setTimeout(() => setTour(route), 900); return () => clearTimeout(t); }, [route, !!E]);
 
     if (ws.status === 'loading') return html`<${Center}><div className="mapact"><span className="spin"></span><span>Cargando la cuenta…</span></div><//>`;
     if (ws.status === 'error') return html`<${Center}><h2>No se pudo cargar la cuenta</h2><p className="muted">${ws.error}</p><button className="btn primary" type="button" onClick=${() => location.reload()}>Reintentar</button><//>`;
-    if (ws.status === 'unpublished' || (!P.tita && !cfg.setupDone)) return html`<${Center}><div className="brand"><img src="/brand/tita-mark.svg" alt="" width="26" height="26" /><span className="wm">TITA MEDIA</span><span className="prod">Pricing Intelligence 360°</span></div><h2>Estamos preparando tu cuenta</h2><p className="muted">El equipo de Tita está importando los catálogos, definiendo las categorías y revisando la clasificación. Te avisaremos cuando el análisis esté listo.</p><button className="btn ghost" type="button" onClick=${() => L.api('POST', '/logout').then(() => location.reload())}>Cerrar sesión</button><//>`;
+    if (ws.status === 'unpublished' || (!P.tita && !cfg.setupDone)) return html`<${Center}><div className="brand"><img src="/brand/tita-mark.svg" alt="" width="26" height="26" /><span className="wm">Tita Media</span><span className="prod">Pricing Intelligence 360°</span></div><h2>Estamos preparando tu cuenta</h2><p className="muted">El equipo de Tita está importando los catálogos, definiendo las categorías y revisando la clasificación. Te avisaremos cuando el análisis esté listo.</p><button className="btn ghost" type="button" onClick=${() => L.api('POST', '/logout').then(() => location.reload())}>Cerrar sesión</button><//>`;
     const tok = getTok(orgId);
     const share = tok ? location.origin + '/?analisis=' + tok : null;
     const guestBar = quick && !P.tita ? html`<div className="adminbar"><b>Análisis rápido de ${orgInfo.name}</b><span className="sm">Datos públicos${(ws.stores.own || {}).importedAt ? ' leídos el ' + new Date(ws.stores.own.importedAt).toLocaleDateString('es-CO') : ''} · disponible hasta el ${new Date(orgInfo.expires_at || me.org.expiresAt).toLocaleDateString('es-CO')}</span>${share ? html`<button type="button" className="btn sm" onClick=${(e) => { const b = e.currentTarget; navigator.clipboard && navigator.clipboard.writeText(share).then(() => (b.textContent = 'Link copiado'), () => (b.textContent = share)); }}>Copiar link para compartir</button>` : null}<button type="button" className="btn sm primary" onClick=${() => L.api('POST', '/logout').then(() => { location.href = '/'; })}>Analizar otra tienda</button></div>` : null;
@@ -274,10 +277,10 @@
       ['Validación y aprendizaje', [['pulse', 'Pulse WTP', 'pulse'], ['learning', 'Revenue Learning', 'learning']]],
       ...(P.tita ? [['Administración Tita', [['data', 'Catálogo y clasificación', 'store'], ['config', 'Configuración', 'config'], ['usuarios', 'Usuarios', 'lock']]]] : P.priv ? [['Datos', [['privados', 'Costos y ventas', 'upload']]]] : []),
     ];
-    const navItem = ([k, l, ic]) => html`<a key=${k} href=${'#' + k} className=${rt === k ? 'on' : ''} aria-current=${rt === k ? 'page' : undefined} onClick=${(e) => { e.preventDefault(); go(k); }}><${Icon} n=${ic} />${l}${k === 'market' && E.pendingMaps && P.tita ? html`<span className="cnt">${E.pendingMaps}</span>` : null}${k === 'advisor' && pend ? html`<span className="cnt">${pend}</span>` : null}${k === 'data' && D.pending ? html`<span className="cnt" title="Productos sin clasificar">${D.pending > 999 ? '999+' : D.pending}</span>` : null}</a>`;
+    const navItem = ([k, l, ic]) => html`<a key=${k} href=${'#' + k} data-tour=${'nav-' + k} className=${rt === k ? 'on' : ''} aria-current=${rt === k ? 'page' : undefined} onClick=${(e) => { e.preventDefault(); go(k); }}><${Icon} n=${ic} />${l}${k === 'market' && E.pendingMaps && P.tita ? html`<span className="cnt">${E.pendingMaps}</span>` : null}${k === 'advisor' && pend ? html`<span className="cnt">${pend}</span>` : null}${k === 'data' && D.pending ? html`<span className="cnt" title="Productos sin clasificar">${D.pending > 999 ? '999+' : D.pending}</span>` : null}</a>`;
     return html`<div className=${'shell ' + (cpOpen ? 'cp-on' : '')}>
       <aside className=${'side ' + (navOpen ? 'open' : '')}>
-        <div className="brandmark side-brand"><img className="mark" src="/brand/tita-mark.svg" alt="" width="28" height="28" /><div><b className="wm">TITA MEDIA</b><small>Pricing Intelligence 360°</small></div></div>
+        <div className="brandmark side-brand"><img className="mark" src="/brand/tita-mark.svg" alt="" width="28" height="28" /><div><b className="wm">Tita Media</b><small>Pricing Intelligence 360°</small></div></div>
         <nav aria-label="Módulos">${NAV.map(([g, items]) => html`<div key=${g} className="ng"><span>${g}</span>${items.map(navItem)}</div>`)}</nav>
         <div className="sidefoot"><div className="tenant"><span className="muted">Cuenta</span><b>${orgInfo.name}</b><small>${P.guest ? 'Análisis rápido · solo lectura' : me.user.name + ' · ' + ROLE[me.user.role]}</small><button type="button" className="linkbtn side-link" onClick=${() => L.api('POST', '/logout').then(() => { location.href = '/'; })}>${P.guest ? 'Salir' : 'Cerrar sesión'}</button></div></div>
       </aside>
@@ -287,10 +290,12 @@
         <header className="top">
           <button type="button" className="iconbtn menu" aria-label="Abrir menú" onClick=${() => setNavOpen(true)}><${Icon} n="menu" /></button>
           <div className="topctx"><b>${D.brandById.own.name}</b><span className="muted">${(ws.stores.own && ws.stores.own.url) ? I.hostOf(ws.stores.own.url) : ''}</span><span className="pill">${E.mk.currency}</span><span className="pill">${D.products.filter((p) => p.cat).length} productos clasificados</span>${(ws.stores.own || {}).importedAt ? html`<span className="pill">Datos al ${new Date(ws.stores.own.importedAt).toLocaleDateString('es-CO')}</span>` : null}${!P.write ? html`<span className="pill demo">Solo lectura</span>` : null}</div>
-          <button type="button" className=${'btn sm cpbtn ' + (cpOpen ? 'primary' : '')} disabled=${!me.ai} title=${me.ai ? '' : 'La IA no está configurada en el servidor'} onClick=${() => setCpOpen(!cpOpen)} aria-expanded=${cpOpen}><${Icon} n="spark" />Copiloto</button>
+          ${TP.guide.TOURS[rt] ? html`<button type="button" className="btn sm ghost" data-tour="guide" onClick=${() => setTour(rt)}><span aria-hidden="true">?</span> Guía</button>` : null}
+          <button type="button" data-tour="copilot" className=${'btn sm cpbtn ' + (cpOpen ? 'primary' : '')} disabled=${!me.ai} title=${me.ai ? '' : 'La IA no está configurada en el servidor'} onClick=${() => setCpOpen(!cpOpen)} aria-expanded=${cpOpen}><${Icon} n="spark" />Copiloto</button>
         </header>
         <main id="content">${view}</main>
       </div>
+      ${tour ? html`<${TP.guide.Tour} key=${tour} id=${tour} onClose=${() => setTour(null)} />` : null}
       <${Copilot} E=${E} f=${f} open=${cpOpen} setOpen=${setCpOpen} msgs=${msgs} setMsgs=${setMsgs} actions=${actions} />
       <${Toasts} />
     </div>`;
@@ -350,7 +355,7 @@
   function Login({ onDone }) {
     const [email, setEmail] = useState(''); const [pw, setPw] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
     const submit = async (e) => { e.preventDefault(); setBusy(true); setErr(''); try { await L.api('POST', '/login', { email, password: pw }); onDone(); } catch (x) { setErr(x.message); } setBusy(false); };
-    return html`<${Center}><div className="brand"><img src="/brand/tita-mark.svg" alt="" width="26" height="26" /><span className="wm">TITA MEDIA</span><span className="prod">Pricing Intelligence 360°</span></div><h1>Inteligencia de precios para tu catálogo</h1><form className="urlform" onSubmit=${submit}><label className="fld" htmlFor="lg-e"><span>Correo</span><input id="lg-e" type="email" autoComplete="username" value=${email} onInput=${(e) => setEmail(e.target.value)} /></label><label className="fld" htmlFor="lg-p"><span>Contraseña</span><input id="lg-p" type="password" autoComplete="current-password" value=${pw} onInput=${(e) => setPw(e.target.value)} /></label>${err ? html`<div className="err" role="alert">${err}</div>` : null}<button className="btn primary" type="submit" disabled=${busy || !email || !pw}>${busy ? 'Entrando…' : 'Entrar'}</button></form><p className="muted sm">¿No tienes acceso? Escríbele a tu contacto en Tita Media.</p><//>`;
+    return html`<${Center}><div className="brand"><img src="/brand/tita-mark.svg" alt="" width="26" height="26" /><span className="wm">Tita Media</span><span className="prod">Pricing Intelligence 360°</span></div><h1>Inteligencia de precios para tu catálogo</h1><form className="urlform" onSubmit=${submit}><label className="fld" htmlFor="lg-e"><span>Correo</span><input id="lg-e" type="email" autoComplete="username" value=${email} onInput=${(e) => setEmail(e.target.value)} /></label><label className="fld" htmlFor="lg-p"><span>Contraseña</span><input id="lg-p" type="password" autoComplete="current-password" value=${pw} onInput=${(e) => setPw(e.target.value)} /></label>${err ? html`<div className="err" role="alert">${err}</div>` : null}<button className="btn primary" type="submit" disabled=${busy || !email || !pw}>${busy ? 'Entrando…' : 'Entrar'}</button></form><p className="muted sm">¿No tienes acceso? Escríbele a tu contacto en Tita Media.</p><//>`;
   }
   function ChangePassword({ onDone }) {
     const [pw, setPw] = useState(''); const [pw2, setPw2] = useState(''); const [err, setErr] = useState('');

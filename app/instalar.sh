@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Instalador de TITA Pricing Intelligence 360° en un servidor Ubuntu 22.04 o 24.04.
+# Instalador de Tita Pricing Intelligence 360° en un servidor Ubuntu 22.04 o 24.04.
 # Uso: copia la carpeta app/ al servidor y ejecuta:  sudo ./instalar.sh
 set -euo pipefail
 cd "$(dirname "$0")"

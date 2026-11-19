@@ -1,4 +1,4 @@
-/* TITA Pricing Intelligence 360° — motor de estado, onboarding, Overview y Market Intelligence. */
+/* Tita Pricing Intelligence 360° — motor de estado, onboarding, Overview y Market Intelligence. */
 (function () {
   'use strict';
   const { useState, useMemo, useEffect } = React;
@@ -44,7 +44,7 @@
     const cat = E.D.catById[f.cat];
     const comps = E.cfg.comps;
     const toggle = (b) => setF({ ...f, brands: f.brands.includes(b) ? f.brands.filter((x) => x !== b) : [...f.brands, b] });
-    return html`<div className="filters" role="region" aria-label="Filtros activos">
+    return html`<div className="filters" role="region" aria-label="Filtros activos" data-tour="market-filters">
       <${Select} id="f-cat" label="Categoría" value=${f.cat} onChange=${(v) => setF({ ...f, cat: v, mat: 'all', typ: 'all' })} options=${E.cats.map((c) => ({ v: c.id, l: c.name }))} compact />
       <${Select} id="f-typ" label="Tipología" value=${f.typ} onChange=${(v) => setF({ ...f, typ: v })} options=${[{ v: 'all', l: 'Todas' }, ...cat.typologies.map((t) => ({ v: t, l: t }))]} compact />
       <${Select} id="f-mat" label="Material" value=${f.mat} onChange=${(v) => setF({ ...f, mat: v })} options=${[{ v: 'all', l: 'Todos' }, ...cat.materials.map((t) => ({ v: t, l: t }))]} compact />
@@ -119,32 +119,32 @@
     return html`<div className="page">
       <header className="ph"><div><div className="eyebrow">Overview</div><h1>¿Qué está pasando con tus precios?</h1><p>${E.D.brandById.own.name} frente a ${E.cfg.comps.length} competidores en ${E.cats.length} categorías · ${TP.MARKETS[E.cfg.market].name}, ${E.mk.currency}</p></div>
         <button className="startcard" type="button" onClick=${() => go(start[1], start[2])}><span className="eyebrow">Tu prioridad: ${A.OBJECTIVES.find((o) => o.v === obj).l}</span><b>${start[0]}</b><${Icon} n="arrow" /></button></header>
-      ${(E.cfg.ownDiag || cps.length) ? html`<section className="panel cover" id="cobertura"><div className="ptitle"><div><span className="eyebrow">Cobertura de datos</span><h2>Con qué información se hizo este análisis</h2></div>
+      ${(E.cfg.ownDiag || cps.length) ? html`<section className="panel cover" id="cobertura" data-tour="cover"><div className="ptitle"><div><span className="eyebrow">Cobertura de datos</span><h2>Con qué información se hizo este análisis <${TP.guide.Help} k="o_cover" /></h2></div>
           <span className="muted sm">${E.cfg.ownDiag && E.cfg.ownDiag.at ? 'Catálogo leído el ' + new Date(E.cfg.ownDiag.at).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }) : ''}</span></div>
         <div className="kpis compact">
           <div className="kpi"><span>Tu catálogo</span><b>${(E.cfg.ownDiag && E.cfg.ownDiag.priced) || E.D.products.filter((p) => p.brand === 'own').length}</b><em>${E.cfg.ownDiag ? (E.cfg.ownDiag.methodLabel || '') + (E.cfg.ownDiag.currency ? ' · ' + E.cfg.ownDiag.currency : '') : 'productos con precio'}</em></div>
-          <div className="kpi"><span>Competidores en el análisis</span><b>${cps.filter((c) => c.include).length || E.cfg.comps.length}<small>/${cps.length || E.cfg.comps.length}</small></b><em>${cps.length ? cps.filter((c) => !c.include).length + ' como referencia o pendientes' : 'confirmados'}</em></div>
-          <div className="kpi"><span>Productos comparables</span><b>${E.cats.reduce((n, c) => n + (E.pool[c.id] || []).length, 0)}</b><em>de la competencia, en ${E.cats.length} categorías</em></div>
-          <div className="kpi"><span>Categorías con modelo</span><b>${E.cats.filter((c) => E.model[c.id].ok).length}<small>/${E.cats.length}</small></b><em>las demás usan solo comparables directos</em></div>
+          <div className="kpi"><span>Competidores en el análisis <${TP.guide.Help} k="o_comps" /></span><b>${cps.filter((c) => c.include).length || E.cfg.comps.length}<small>/${cps.length || E.cfg.comps.length}</small></b><em>${cps.length ? cps.filter((c) => !c.include).length + ' como referencia o pendientes' : 'confirmados'}</em></div>
+          <div className="kpi"><span>Productos comparables <${TP.guide.Help} k="o_comparables" /></span><b>${E.cats.reduce((n, c) => n + (E.pool[c.id] || []).length, 0)}</b><em>de la competencia, en ${E.cats.length} categorías</em></div>
+          <div className="kpi"><span>Categorías con modelo <${TP.guide.Help} k="o_model" /></span><b>${E.cats.filter((c) => E.model[c.id].ok).length}<small>/${E.cats.length}</small></b><em>las demás usan solo comparables directos</em></div>
         </div>
         ${cps.length ? html`<details className="manual"><summary>Ver competidores, cómo los clasificamos y su evidencia</summary><${TP.onboard.CompetitorBoard} comps=${cps} org=${TP.live.org} canRetry=${String(TP.live.org || '').startsWith('q-') && !(E.P && E.P.guest === false && !E.P.tita)} onRetried=${() => location.reload()} /></details>` : null}
         ${E.cfg.ownDiag ? html`<details className="manual"><summary>Ver diagnóstico de conexión de tu tienda</summary><${TP.onboard.ConnectionDiagnosis} d=${E.cfg.ownDiag} title=${E.D.brandById.own.name} /></details>` : null}
       </section>` : null}
-      <div className="kpis">
-        <div className="kpi"><span>Portafolio con precio estimado</span><b>${valid.length}<small>/${E.allDiag.length}</small></b><em>${Math.round((valid.length / Math.max(1, E.allDiag.length)) * 100)} % del catálogo analizado</em></div>
-        <div className="kpi"><span>Índice de precio vs. mercado</span><b>${isFinite(idx) ? Math.round(idx * 100) : '—'}</b><em>100 = mediana de la competencia (mediana entre categorías)</em></div>
-        <div className="kpi"><span>Por debajo de su banda</span><b className="t-up">${below.length}</b><em>posible margen sin cambiar el producto</em></div>
-        <div className="kpi"><span>Por encima de su banda</span><b className="t-down">${above.length}</b><em>revisar precio o comunicar valor</em></div>
-        <div className="kpi"><span>Espacios competitivos</span><b>${ws}</b><em>tipología × franja con poca oferta propia</em></div>
+      <div className="kpis" data-tour="kpis">
+        <div className="kpi"><span>Portafolio con precio estimado <${TP.guide.Help} k="o_estimated" /></span><b>${valid.length}<small>/${E.allDiag.length}</small></b><em>${Math.round((valid.length / Math.max(1, E.allDiag.length)) * 100)} % del catálogo analizado</em></div>
+        <div className="kpi"><span>Índice de precio vs. mercado <${TP.guide.Help} k="o_index" /></span><b>${isFinite(idx) ? Math.round(idx * 100) : '—'}</b><em>100 = mediana de la competencia (mediana entre categorías)</em></div>
+        <div className="kpi"><span>Por debajo de su banda <${TP.guide.Help} k="o_below" /></span><b className="t-up">${below.length}</b><em>posible margen sin cambiar el producto</em></div>
+        <div className="kpi"><span>Por encima de su banda <${TP.guide.Help} k="o_above" /></span><b className="t-down">${above.length}</b><em>revisar precio o comunicar valor</em></div>
+        <div className="kpi"><span>Espacios competitivos <${TP.guide.Help} k="o_ws" /></span><b>${ws}</b><em>tipología × franja con poca oferta propia</em></div>
       </div>
       <div className="grid-main">
-        <section className="panel"><div className="ptitle"><h2>Decisiones para evaluar primero</h2><button className="linkbtn" type="button" onClick=${() => go('advisor', {})}>Ver todas</button></div>
-          ${prio.length ? html`<div className="tw"><table className="tbl"><thead><tr><th>Producto</th><th className="num">Precio actual</th><th className="num">Estimado</th><th className="num">Brecha</th><th>Evidencia</th><th>Sugerencia</th></tr></thead><tbody>
+        <section className="panel" data-tour="decisions"><div className="ptitle"><h2>Decisiones para evaluar primero</h2><button className="linkbtn" type="button" onClick=${() => go('advisor', {})}>Ver todas</button></div>
+          ${prio.length ? html`<div className="tw"><table className="tbl"><thead><tr><th>Producto</th><th className="num">Precio actual</th><th className="num">Estimado</th><th className="num">Brecha <${TP.guide.Help} k="t_gap" /></th><th>Evidencia <${TP.guide.Help} k="t_evidence" /></th><th>Sugerencia <${TP.guide.Help} k="t_action" /></th></tr></thead><tbody>
             ${prio.map((d) => html`<tr key=${d.p.id} className="click" tabIndex="0" onClick=${() => openProduct(d.cat.id, d.p.id)} onKeyDown=${(e) => e.key === 'Enter' && openProduct(d.cat.id, d.p.id)}><td><div className="pcell"><${Thumb} p=${d.p} size=${34} /><div><b>${d.p.name}</b><small>${d.cat.short} · ${d.p.mat}</small></div></div></td><td className="num">${TP.fmt(d.p.list, mk)}</td><td className="num">${d.est ? TP.fmt(d.est, mk) : '—'}</td><td className=${'num ' + (d.gap < 0 ? 't-up' : 't-down')}>${TP.pct(d.gap)}</td><td><${Badge} tone=${d.evidence === 'consistente' ? 'ok' : 'warn'}>${d.evidence}<//></td><td>${A.ACTION[d.action]}</td></tr>`)}
           </tbody></table></div>` : html`<${Empty} title="Sin decisiones pendientes">Todos los productos con estimación están dentro de su banda.<//>`}
           <p className="foot">Brecha = precio actual frente al precio estimado por atributos. No es disposición a pagar ni precio óptimo: es lo que cobra el mercado por atributos similares.</p>
         </section>
-        <section className="panel"><div className="ptitle"><h2>Alertas</h2></div>
+        <section className="panel" data-tour="alerts"><div className="ptitle"><h2>Alertas</h2></div>
           ${alerts.length ? null : html`<p className="muted sm">Sin alertas por ahora.</p>`}<ul className="alerts">${alerts.map((a, i) => html`<li key=${i} className=${'al-' + a.tone}><${Icon} n=${a.tone === 'warn' ? 'alert' : 'info'} /><div><b>${a.t}</b><p>${a.d}</p>${a.a ? html`<button className="linkbtn" type="button" onClick=${a.a}>${a.al}</button>` : null}</div></li>`)}</ul></section>
       </div>
       <section className="panel"><div className="ptitle"><h2>Estado por categoría</h2></div>
@@ -166,7 +166,7 @@
     const V = { homolog: Homolog, valor: ValueV, categoria: CatVsCat, producto: ProdVsProd, escalera: LadderV, rangos: RangesV, piramide: PyramidV, territorios: TerritoryV, whitespace: WhiteSpaceV, composicion: CompositionV, capsulas: CapsulesV, transversal: CrossV }[sub] || Homolog;
     return html`<div className="page">
       <header className="ph"><div><div className="eyebrow">Market Intelligence</div><h1>${SUBS.find((s) => s[0] === sub)[1]}</h1><p>${SUBQ[sub]}</p></div></header>
-      <nav className="tabs" aria-label="Vistas de mercado">${SUBS.map(([k, l]) => html`<button key=${k} type="button" className=${sub === k ? 'on' : ''} aria-current=${sub === k ? 'page' : undefined} onClick=${() => setSub(k)}>${l}${k === 'homolog' && E.pendingMaps ? html`<span className="cnt">${E.pendingMaps}</span>` : null}</button>`)}</nav>
+      <nav className="tabs" aria-label="Vistas de mercado" data-tour="market-tabs">${SUBS.map(([k, l]) => html`<button key=${k} type="button" className=${sub === k ? 'on' : ''} aria-current=${sub === k ? 'page' : undefined} onClick=${() => setSub(k)}>${l}${k === 'homolog' && E.pendingMaps ? html`<span className="cnt">${E.pendingMaps}</span>` : null}</button>`)}</nav>
       ${sub !== 'homolog' && sub !== 'transversal' ? html`<${A.FilterBar} E=${E} f=${f} setF=${setF} />` : null}
       <${V} ...${props} />
     </div>`;

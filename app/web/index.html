@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>TITA Pricing Intelligence 360°</title>
+<title>Tita Pricing Intelligence 360°</title>
 <link rel="icon" href="/brand/tita-mark.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@200;300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-/* Sistema visual TITA Media aplicado al producto. Ver docs/DISENO.md.
+/* Sistema visual Tita Media aplicado al producto. Ver docs/DISENO.md.
    Marca (titamedia.com, variables --tm-*): acento menta #80E593, turquesa #52C7CF, tinta #141414/#0B0C0C, panel #1A1A1A,
    superficie #FFF, superficie suave #F2F4F3, verde legible #2E8C52, turquesa legible #17747C, textos #4A524E/#5F6662,
    línea rgba(20,20,20,.14); tipografías Be Vietnam Pro (200–600) e IBM Plex Mono; esquinas rectas y líneas de 1 px.
@@ -219,6 +219,11 @@ input[type=checkbox]{accent-color:var(--acc)}
 .scanrow,.procrow{display:flex;align-items:center;gap:10px;padding:6px 0;color:var(--fg3);font-size:13.5px}
 .procrow{display:grid;grid-template-columns:24px minmax(0,230px) minmax(0,1fr);border-bottom:1px solid var(--line)}
 .procrow:last-child{border-bottom:0}
+.how{list-style:none;counter-reset:how;margin:10px 0 12px;padding:0;display:grid;gap:0;text-align:left}
+.how li{counter-increment:how;display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+.how li:last-child{border-bottom:0}
+.how li::before{content:counter(how,decimal-leading-zero);grid-row:span 2;font-family:var(--mono,'IBM Plex Mono',monospace);font-size:11px;color:var(--teal-ink,#17747C);padding-top:2px}
+.how b{font-weight:600;font-size:14px}.how span{color:var(--fg2);font-size:13px;line-height:1.45}
 .procrow b{font-weight:600}.procrow .res{color:var(--fg2);font-size:13px}
 .scanrow.done,.procrow.done{color:var(--fg)}
 .st{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;border:1px solid var(--line2);flex:none}
@@ -572,7 +577,7 @@ span.sel{user-select:all;background:var(--surface);padding:1px 6px;border-radius
 .side-link{color:var(--side-fg);margin-top:6px;text-align:left;font-size:12px}
 @media (max-width:700px){.grid-3f{grid-template-columns:minmax(0,1fr)}}
 
-/* ===================== Capa de marca TITA Media (sobrescribe la base) ===================== */
+/* ===================== Capa de marca Tita Media (sobrescribe la base) ===================== */
 body{font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;font-feature-settings:"tnum" 1}
 ::selection{background:var(--tm-accent);color:#141414}
 :focus-visible{outline:2px solid var(--acc-ink);outline-offset:3px}
@@ -631,7 +636,7 @@ a{color:var(--acc-ink)}
 .land-top,.ob-top{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
 .land-top{max-width:1240px;margin:0 auto;padding:18px clamp(16px,5vw,88px);border-bottom:1px solid var(--line)}
 .brand{display:flex;align-items:center;gap:10px;min-width:0}
-.brand .wm{font-weight:300;letter-spacing:.32em;font-size:13px;white-space:nowrap}
+.brand .wm{font-weight:500;letter-spacing:-.005em;font-size:16px;white-space:nowrap}
 .brand .prod{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg3);border-left:1px solid var(--line2);padding-left:10px;white-space:nowrap}
 .land-hero{background:var(--tm-ink);color:#fff;position:relative;overflow:hidden}
 .land-hero::before{content:"";position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.14) 1.2px,transparent 1.2px);background-size:28px 28px;-webkit-mask-image:linear-gradient(100deg,transparent 35%,#000 90%);mask-image:linear-gradient(100deg,transparent 35%,#000 90%);pointer-events:none}
@@ -702,7 +707,7 @@ a{color:var(--acc-ink)}
 @media (max-width:900px){.land-steps{grid-template-columns:repeat(2,minmax(0,1fr))}.land-facts ul{grid-template-columns:minmax(0,1fr)}.stepper{grid-template-columns:repeat(5,minmax(0,1fr))}.stepper li .t{display:none}.diag-kv{grid-template-columns:repeat(2,minmax(0,1fr))}.diag-stages{grid-template-columns:repeat(5,minmax(0,1fr))}.diag-stages span{font-size:0;height:0}}
 @media (max-width:560px){.brand .prod{display:none}.cand label{grid-template-columns:20px minmax(0,1fr)}.cand-tags{grid-column:2;justify-content:flex-start}.diag-kv{grid-template-columns:minmax(0,1fr)}.land-steps{grid-template-columns:minmax(0,1fr)}}
 .side-brand{display:flex;align-items:center;gap:10px;padding:6px 10px 22px;color:#fff}
-.side-brand .wm{display:block;font-weight:300;letter-spacing:.3em;font-size:12.5px;color:#fff!important}
+.side-brand .wm{display:block;font-weight:500;letter-spacing:-.005em;font-size:15px;color:#fff!important}
 .side-brand small{display:block;font-family:var(--f-mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.5);margin-top:3px;line-height:1.35}
 .side-brand .mark{border:1px solid rgba(255,255,255,.18);border-radius:6px}
 /* ficha de decisión del Pricing Advisor */
@@ -738,16 +743,38 @@ details.sheet[open]>summary::after{content:"−"}
 .strat form.sheet{border:0;padding:0}
 .ob-in>.eyebrow{margin-top:8px}
 @media (max-width:900px){.procrow{grid-template-columns:24px minmax(0,1fr)}.procrow .res{grid-column:2}}
+/* nombres de grupo de la navegación en tipo oración (la marca se escribe «Tita», no en mayúsculas) */
+.ng>span{text-transform:none;letter-spacing:.04em;font-size:11px}
+/* «?»: explicación de cada campo y resultado */
+.help{position:relative;display:inline-flex;vertical-align:middle;margin-left:4px;text-transform:none;letter-spacing:0;font-family:var(--f-body)}
+.help-b{width:16px;height:16px;border-radius:50%;border:1px solid var(--line2);background:var(--surface);color:var(--fg2);font:600 10px/14px var(--f-body);padding:0;display:inline-grid;place-items:center;cursor:pointer}
+.help-b:hover,.help-b[aria-expanded=true]{border-color:var(--acc-ink);color:var(--acc-ink)}
+.help-p{position:fixed;z-index:70;background:var(--tm-ink);color:#fff;padding:12px 14px;display:flex;flex-direction:column;gap:6px;font-size:13px;line-height:1.5;font-weight:400;text-align:left;white-space:normal;box-shadow:0 12px 28px rgba(0,0,0,.25)}
+.help-p b{font-weight:500;color:var(--tm-accent)}
+.help-p span{color:rgba(255,255,255,.86)}
+.side .help-b{background:transparent;color:rgba(255,255,255,.6);border-color:rgba(255,255,255,.3)}
+/* recorrido guiado */
+.tour{position:fixed;inset:0;z-index:90}
+.tour-dim{position:fixed;inset:0;background:rgba(11,12,12,.55)}
+.tour-hole{position:fixed;box-shadow:0 0 0 9999px rgba(11,12,12,.55);outline:2px solid var(--tm-accent);pointer-events:none;transition:all .25s cubic-bezier(.22,.61,.36,1)}
+.tour-card{position:fixed;background:var(--surface);color:var(--fg);border-top:2px solid var(--tm-accent);padding:18px;display:flex;flex-direction:column;gap:8px;box-shadow:0 18px 40px rgba(0,0,0,.3);outline:none}
+.tour-card h3{font-size:18px;font-weight:400;letter-spacing:-.015em}
+.tour-card p{color:var(--fg2);font-size:14px;line-height:1.6}
+.tour-act{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:6px}.tour-act span{display:flex;gap:6px}
+@media (prefers-reduced-motion:reduce){.tour-hole{transition:none}}
+.explain{font-size:13.5px;color:var(--fg2);line-height:1.6;border-left:2px solid var(--tm-accent2);padding:2px 0 2px 12px}
+.legend-g{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12.5px;color:var(--fg2);align-items:center}
 </style>
 </head>
 <body>
-<div id="root"><div class="ob"><div class="ob-in"><p class="muted">Cargando TITA Pricing Intelligence 360°…</p></div></div></div>
+<div id="root"><div class="ob"><div class="ob-in"><p class="muted">Cargando Tita Pricing Intelligence 360°…</p></div></div></div>
 <script src="/vendor/react.js"></script>
 <script src="/vendor/react-dom.js"></script>
 <script src="/vendor/htm.js"></script>
 <script src="/vendor/xlsx.js"></script>
 <script src="/js/engine.js"></script>
 <script src="/js/ui.js"></script>
+<script src="/js/guide.js"></script>
 <script src="/js/ingest.js"></script>
 <script src="/js/live.js"></script>
 <script src="/js/core.js"></script>

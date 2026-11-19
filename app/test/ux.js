@@ -63,8 +63,15 @@ async function audit(page) {
   await page.waitForSelector('text=Configura tu estrategia', { timeout: 90000 }).catch(() => {});
   await all('3-fases');
   await page.waitForSelector('text=¿Qué está pasando con tus precios?', { timeout: 120000 });
+  await page.waitForSelector('.tour-card', { timeout: 8000 });
+  await all('4a-guia');
+  await page.keyboard.press('Escape'); await sleep(300);
+  await page.click('button[aria-label^="Qué significa"] >> nth=0'); await page.waitForSelector('.help-p');
+  await all('4b-ayuda');
+  await page.keyboard.press('Escape');
   await all('4-overview');
-  await page.click('.side >> text=Pricing Advisor'); await page.waitForSelector('.advgrid tbody tr'); await page.click('.advgrid tbody tr >> nth=0'); await page.waitForSelector('.decision');
+  await page.click('.side >> text=Pricing Advisor'); await page.waitForSelector('.tour-card', { timeout: 8000 }); await page.keyboard.press('Escape'); await sleep(300);
+  await page.waitForSelector('.advgrid tbody tr'); await page.click('.advgrid tbody tr >> nth=0'); await page.waitForSelector('.decision');
   await all('5-advisor');
   console.log(JSON.stringify(results.map((r) => ({ pantalla: r.screen, vista: r.view, desborde: r.overflow, sinNombre: r.unnamed.length, sinAlt: r.noAlt, bajoContraste: r.lowContrast.length, ejemplos: [...r.unnamed.slice(0, 2), ...r.lowContrast.slice(0, 3)] }))));
   console.log('errores de página: ' + errs.length + (errs.length ? ' · ' + errs[0] : ''));

@@ -1,4 +1,4 @@
-/* TITA Pricing Intelligence 360° — motor de datos de demostración y analítica.
+/* Tita Pricing Intelligence 360° — motor de datos de demostración y analítica.
    Todo lo que hay aquí corre en el navegador sobre datos ficticios generados de forma
    determinística (misma URL + mismo mercado = mismos datos). */
 (function () {

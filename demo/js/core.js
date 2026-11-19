@@ -1,4 +1,4 @@
-/* TITA Pricing Intelligence 360° — motor de estado, onboarding, Overview y Market Intelligence. */
+/* Tita Pricing Intelligence 360° — motor de estado, onboarding, Overview y Market Intelligence. */
 (function () {
   'use strict';
   const { useState, useMemo, useEffect } = React;
@@ -147,7 +147,7 @@
 
     if (step === 0)
       return html`<div className="ob"><div className="ob-in">
-        <div className="brandmark"><span className="logo">T</span>TITA Pricing Intelligence <b>360°</b></div>
+        <div className="brandmark"><span className="logo">T</span>Tita Pricing Intelligence <b>360°</b></div>
         <h1>Descubre oportunidades de rentabilidad en tu catálogo.</h1>
         <p className="lead">Conecta tu tienda y deja que nuestra inteligencia artificial analice tus productos, entienda tu mercado y te ayude a tomar mejores decisiones de precios.</p>
         ${stepper}

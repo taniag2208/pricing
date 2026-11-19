@@ -1,4 +1,4 @@
-/* TITA Pricing Intelligence 360° — ingesta de catálogos reales y tareas de IA.
+/* Tita Pricing Intelligence 360° — ingesta de catálogos reales y tareas de IA.
    Formatos: Shopify (/products.json), WooCommerce (Store API), VTEX (catalog search),
    CSV/TSV, Excel y texto de una página (extracción con IA). */
 (function () {

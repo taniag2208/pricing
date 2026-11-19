@@ -1,4 +1,4 @@
-/* TITA Pricing Intelligence 360° — Price Advisor, Product Launch, Promotion Optimizer, Pulse WTP, Revenue Learning y Configuración. */
+/* Tita Pricing Intelligence 360° — Price Advisor, Product Launch, Promotion Optimizer, Pulse WTP, Revenue Learning y Configuración. */
 (function () {
   'use strict';
   const { useState, useMemo, useEffect } = React;

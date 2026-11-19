@@ -1,4 +1,4 @@
-/* TITA Pricing Intelligence 360° — copiloto, shell de navegación y arranque. */
+/* Tita Pricing Intelligence 360° — copiloto, shell de navegación y arranque. */
 (function () {
   'use strict';
   const { useState, useMemo, useEffect, useRef } = React;
@@ -189,7 +189,7 @@
     const navItem = ([k, l, ic]) => html`<a key=${k} href=${'#' + k} className=${route === k ? 'on' : ''} aria-current=${route === k ? 'page' : undefined} onClick=${(e) => { e.preventDefault(); go(k); }}><${Icon} n=${ic} />${l}${k === 'market' && E.pendingMaps ? html`<span className="cnt">${E.pendingMaps}</span>` : null}${k === 'advisor' && pend ? html`<span className="cnt">${pend}</span>` : null}${k === 'promo' || k === 'learning' ? html`<span className="tagx">expansión</span>` : null}</a>`;
     return html`<div className=${'shell ' + (cpOpen ? 'cp-on' : '')}>
       <aside className=${'side ' + (navOpen ? 'open' : '')}>
-        <div className="brandmark"><span className="logo">T</span><div><b>TITA Pricing</b><small>Intelligence 360°</small></div></div>
+        <div className="brandmark"><span className="logo">T</span><div><b>Tita Pricing</b><small>Intelligence 360°</small></div></div>
         <nav aria-label="Módulos">${NAV.map(([g, items]) => html`<div key=${g} className="ng"><span>${g}</span>${items.map(navItem)}</div>`)}</nav>
         <div className="sidefoot">${navItem(['config', 'Configuration', 'config'])}<div className="tenant"><span className="muted">Espacio de trabajo</span><b>${cfg.storeName}</b><small>${cfg.platform} · ${TP.MARKETS[cfg.market].name}</small></div></div>
       </aside>

@@ -1,4 +1,4 @@
-# Sistema visual de TITA Pricing Intelligence 360°
+# Sistema visual de Tita Pricing Intelligence 360°
 
 Fuente: hoja de estilos y HTML públicos de https://titamedia.com/ (inspeccionados el 19/11/2026). Los tokens están en `app/web/index.html` (`:root`).
 
@@ -51,6 +51,11 @@ Fuente: hoja de estilos y HTML públicos de https://titamedia.com/ (inspeccionad
   - datos que faltan.
 - **Cobertura de datos en el Overview:** cuántos productos, competidores, comparables y categorías con modelo respaldan el análisis.
 
+- **Onboarding guiado (`web/js/guide.js`):**
+  - **Recorrido** con foco en cada zona (Overview, Market Intelligence, Pricing Advisor). Se abre solo la primera vez que se visita cada vista y se repite con el botón «Guía» de la barra superior. Teclado: flechas para avanzar y retroceder, Esc para salir.
+  - **Ayuda «?»** junto a cada campo y cada resultado: link de la tienda, fases del análisis, diagnóstico de lectura, competidores (tipo, comparabilidad, evidencia), estrategia, indicadores del Overview, columnas de la tabla de decisiones y campos de la ficha del Pricing Advisor. Todos los textos están en un solo glosario (`G`).
+  - **«Así funciona»** en la landing: las 7 fases explicadas antes de empezar.
+
 ## 4. Accesibilidad y responsive
 
-`app/test/ux.js` recorre landing, confirmación, estrategia, Overview y Pricing Advisor en 390, 820 y 1440 px. En cada una revisa desbordamiento horizontal, controles sin nombre accesible, imágenes sin texto alternativo y contraste de texto (WCAG AA). Resultado actual: 15 de 15 combinaciones sin problemas.
+`app/test/ux.js` recorre landing, confirmación, fases, guía, ayuda «?», Overview y Pricing Advisor en 390, 820 y 1440 px. En cada una revisa desbordamiento horizontal, controles sin nombre accesible, imágenes sin texto alternativo y contraste de texto (WCAG AA). Resultado actual: 21 de 21 combinaciones sin problemas.

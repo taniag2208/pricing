@@ -1,10 +1,11 @@
-/* TITA Pricing Intelligence 360° — onboarding guiado: link → catálogo → mercado → estrategia → oportunidades.
+/* Tita Pricing Intelligence 360° — onboarding guiado: link → catálogo → mercado → estrategia → oportunidades.
    Todo lo que se muestra viene del estado real del trabajo en el servidor (sin animaciones de progreso ficticias). */
 (function () {
   'use strict';
   const { useState, useEffect } = React;
   const TP = window.TP, UI = TP.ui, html = UI.html, L = TP.live, I = TP.ingest;
   const { Icon, Badge, Note } = UI;
+  const Help = (props) => html`<${TP.guide.Help} ...${props} />`;
 
   const tokKey = (org) => 'tita-quick-' + org;
   const saveTok = (org, t) => { try { localStorage.setItem(tokKey(org), t); } catch (e) { /* sin almacenamiento */ } };
@@ -34,15 +35,15 @@
       <div className="diag-head"><div><span className="eyebrow">Diagnóstico de conexión</span><h3>${title || (d.origin ? hostName(d.origin) : 'Tienda')}</h3></div><${Badge} tone=${tone}>${STAGE[d.stage] || d.stage}<//></div>
       <div className="diag-stages">${STAGE_ORDER.map((s, i) => html`<span key=${s} className=${i < idx ? 'done' : i === idx && !terminal ? 'run' : terminal && i === idx && d.stage === 'failed' ? 'fail' : ''}>${STAGE[s]}</span>`)}</div>
       <dl className="diag-kv">
-        <div><dt>Plataforma</dt><dd>${d.platform || 'No identificada'}</dd></div>
-        <div><dt>País y moneda</dt><dd>${(d.country ? COUNTRY[d.country] || d.country : 'Sin confirmar') + ' · ' + (d.currency || 'moneda sin confirmar')}</dd></div>
-        <div><dt>Método de lectura</dt><dd>${d.methodLabel || '—'}</dd></div>
-        <div><dt>Productos encontrados</dt><dd className="mono">${fmtN(d.found)}</dd></div>
-        <div><dt>Con precio válido</dt><dd className="mono">${fmtN(d.priced)}${pricedPct != null ? html` <span className="muted">(${pricedPct} %)</span>` : null}</dd></div>
-        <div><dt>Categorías identificadas</dt><dd className="mono">${fmtN(d.categories)}</dd></div>
+        <div><dt>Plataforma <${Help} k="d_platform" /></dt><dd>${d.platform || 'No identificada'}</dd></div>
+        <div><dt>País y moneda <${Help} k="d_country" /></dt><dd>${(d.country ? COUNTRY[d.country] || d.country : 'Sin confirmar') + ' · ' + (d.currency || 'moneda sin confirmar')}</dd></div>
+        <div><dt>Método de lectura <${Help} k="d_method" /></dt><dd>${d.methodLabel || '—'}</dd></div>
+        <div><dt>Productos encontrados <${Help} k="d_found" /></dt><dd className="mono">${fmtN(d.found)}</dd></div>
+        <div><dt>Con precio válido <${Help} k="d_priced" /></dt><dd className="mono">${fmtN(d.priced)}${pricedPct != null ? html` <span className="muted">(${pricedPct} %)</span>` : null}</dd></div>
+        <div><dt>Categorías identificadas <${Help} k="d_cats" /></dt><dd className="mono">${fmtN(d.categories)}</dd></div>
       </dl>
       ${d.warnings && d.warnings.length ? html`<ul className="diag-warn">${d.warnings.map((w, i) => html`<li key=${i}><${Icon} n="alert" s=${14} />${w}</li>`)}</ul>` : null}
-      ${d.attempts && d.attempts.length ? html`<details className="diag-att"><summary>Qué intentamos (${d.attempts.length})</summary><ol>${d.attempts.map((a, i) => html`<li key=${i}><span className="lvl mono">N${a.level}</span><span>${a.label}</span><${Badge} tone=${(ATT[a.status] || ATT.fail)[0]}>${(ATT[a.status] || ATT.fail)[1]}<//><small>${a.detail}${a.ms ? ' · ' + (a.ms / 1000).toFixed(1) + ' s' : ''}</small></li>`)}</ol></details>` : null}
+      ${d.attempts && d.attempts.length ? html`<details className="diag-att"><summary>Qué intentamos (${d.attempts.length}) <${Help} k="d_attempts" /></summary><ol>${d.attempts.map((a, i) => html`<li key=${i}><span className="lvl mono">N${a.level}</span><span>${a.label}</span><${Badge} tone=${(ATT[a.status] || ATT.fail)[0]}>${(ATT[a.status] || ATT.fail)[1]}<//><small>${a.detail}${a.ms ? ' · ' + (a.ms / 1000).toFixed(1) + ' s' : ''}</small></li>`)}</ol></details>` : null}
       ${children ? html`<div className="diag-actions">${children}</div>` : null}
     </section>`;
   }
@@ -65,7 +66,8 @@
     const send = async (e) => { e.preventDefault(); setBusy(true); setErr(''); try { await L.api('POST', '/quick/' + org + '/comps', { urls }); onSent(); } catch (x) { setErr(x.message); setBusy(false); } };
     const failed = (p.comps || []).filter((c) => c.read && c.read.status === 'failed');
     return html`<form className="sheet" onSubmit=${send}>
-      ${confirm ? html`<p className="lead-s">Encontramos estas tiendas que venden lo mismo que <b>${p.storeName || 'tu tienda'}</b>. Verificamos que cada dominio exista antes de mostrarlo. Marca las que son tu competencia y agrega las que falten.</p>`
+      ${confirm ? html`<p className="lead-s">Encontramos estas tiendas que venden lo mismo que <b>${p.storeName || 'tu tienda'}</b>. Verificamos que cada dominio exista antes de mostrarlo. Marca las que son tu competencia y agrega las que falten.</p>
+        <p className="legend-g"><span>Cómo leer cada tienda:</span><span><${Badge} tone="ok">Dominio verificado<//> <${Help} k="c_verified" /></span><span><${Badge} tone="neutral">Búsqueda web<//> / <${Badge} tone="ok">Catálogo verificado antes<//> <${Help} k="c_source" /></span></p>`
         : html`<${Note} tone="warn">No tenemos competidores con catálogo legible todavía. Escribe los links de las tiendas que compiten contigo y seguimos con el análisis.<//>`}
       ${p.discoverError ? html`<${Note} tone="warn">${p.discoverError}<//>` : null}
       ${cands.length ? html`<ul className="cand">${cands.map((c) => { const v = verOf(c.verified); return html`<li key=${c.url} className=${sel.has(c.url) ? 'on' : ''}>
@@ -86,6 +88,7 @@
     const failed = comps.filter((c) => c.read && c.read.status === 'failed');
     const retry = async () => { setBusy(true); setErr(''); try { await L.api('POST', '/quick/' + org + '/retry', {}); onRetried && onRetried(); } catch (x) { setErr(x.message); } setBusy(false); };
     return html`<div className="board">
+      ${!compact ? html`<p className="legend-g"><span>Tipo <${Help} k="c_type" /></span><span>Comparabilidad <${Help} k="c_comp" /></span><span>Evidencia <${Help} k="c_conf" /></span>${failed.length ? html`<span>Referencia pendiente <${Help} k="c_pending" /></span>` : null}</p>` : null}
       <ul className="comps-list">${comps.map((c) => { const r = READ[(c.read || {}).status] || READ.pending; const t = TYPE[c.type]; const k = COMP[c.comparability]; return html`<li key=${c.url} className=${'cl-' + ((c.read || {}).status || 'pending')}>
         <div className="cl-head"><div><b>${c.name}</b> <span className="mono muted">${hostName(c.url)}</span></div><div className="cl-tags"><${Badge} tone=${r[0]}>${r[1]}<//>${t ? html`<${Badge} tone="info">${t[0]}<//>` : null}${k ? html`<${Badge} tone=${k[0]}>${k[1]}<//>` : null}</div></div>
         ${c.read && c.read.status === 'failed' ? html`<p className="sm">${c.read.why}. Se conserva como referencia pendiente.</p>` : null}
@@ -107,11 +110,11 @@
     const save = async (e) => { e.preventDefault(); setState('saving'); try { await L.api('POST', '/quick/' + org + '/strategy', { ...f, minMargin: f.minMargin === '' ? null : Number(f.minMargin) / 100 }); setState('saved'); onSaved && onSaved(); } catch (x) { setState('error'); L.toast(x.message, 'bad'); } };
     return html`<form className="sheet" onSubmit=${save}>
       <p className="lead-s">Mientras terminamos el análisis, cuéntanos qué buscas. Solo lo imprescindible; puedes cambiarlo después.</p>
-      <fieldset className="opts"><legend className="fld-l">Objetivo principal</legend>${OBJ.map(([k, t, d]) => html`<label key=${k} className=${'optc' + (f.objective === k ? ' on' : '')}><input type="radio" name="obj" className="sr" checked=${f.objective === k} onChange=${() => set('objective', k)} /><b>${t}</b><span>${d}</span></label>`)}</fieldset>
+      <fieldset className="opts"><legend className="fld-l">Objetivo principal <${Help} k="s_obj" /></legend>${OBJ.map(([k, t, d]) => html`<label key=${k} className=${'optc' + (f.objective === k ? ' on' : '')}><input type="radio" name="obj" className="sr" checked=${f.objective === k} onChange=${() => set('objective', k)} /><b>${t}</b><span>${d}</span></label>`)}</fieldset>
       <div className="grid-3f">
-        <label className="fld"><span>Cambio máximo por producto</span><select value=${f.maxChange} onChange=${(e) => set('maxChange', Number(e.target.value))}>${[0.05, 0.08, 0.12, 0.2].map((v) => html`<option key=${v} value=${v}>${Math.round(v * 100)} %</option>`)}</select></label>
-        <label className="fld"><span>Margen mínimo (si conoces tus costos)</span><input type="number" min="0" max="90" placeholder="Opcional, %" value=${f.minMargin} onInput=${(e) => set('minMargin', e.target.value)} /></label>
-        <label className="fld"><span>Redondeo de precios</span><select value=${f.rounding} onChange=${(e) => set('rounding', e.target.value)}>${Object.entries(TP.ROUNDING).map(([k, v]) => html`<option key=${k} value=${k}>${v}</option>`)}</select></label>
+        <label className="fld"><span>Cambio máximo por producto <${Help} k="s_max" /></span><select value=${f.maxChange} onChange=${(e) => set('maxChange', Number(e.target.value))}>${[0.05, 0.08, 0.12, 0.2].map((v) => html`<option key=${v} value=${v}>${Math.round(v * 100)} %</option>`)}</select></label>
+        <label className="fld"><span>Margen mínimo (si conoces tus costos) <${Help} k="s_margin" /></span><input type="number" min="0" max="90" placeholder="Opcional, %" value=${f.minMargin} onInput=${(e) => set('minMargin', e.target.value)} /></label>
+        <label className="fld"><span>Redondeo de precios <${Help} k="s_round" /></span><select value=${f.rounding} onChange=${(e) => set('rounding', e.target.value)}>${Object.entries(TP.ROUNDING).map(([k, v]) => html`<option key=${k} value=${k}>${v}</option>`)}</select></label>
       </div>
       <div className="ob-actions"><span className="muted sm" aria-live="polite">${state === 'saved' ? 'Guardado. Se aplica a las recomendaciones.' : state === 'saving' ? 'Guardando…' : ''}</span><button className="btn primary" type="submit" disabled=${state === 'saving' || state === 'saved'}>Guardar estrategia</button></div>
     </form>`;
@@ -175,16 +178,19 @@
       catch (x) { setErr(x.message); setBusy(false); }
     };
     return html`<div className="ob"><div className="ob-in">
-      <div className="row-between"><div className="brand"><img src="/brand/tita-mark.svg" alt="" width="28" height="28" /><span className="wm">TITA MEDIA</span><span className="prod">Pricing Intelligence 360°</span></div><button type="button" className="linkbtn sm" onClick=${onLogin}>Ingreso equipo Tita</button></div>
+      <div className="row-between"><div className="brand"><img src="/brand/tita-mark.svg" alt="" width="28" height="28" /><span className="wm">Tita Media</span><span className="prod">Pricing Intelligence 360°</span></div><button type="button" className="linkbtn sm" onClick=${onLogin}>Ingreso equipo Tita</button></div>
       <p className="eyebrow">Pricing intelligence · Retail · IA</p>
       <h1>Descubre oportunidades de rentabilidad en tu catálogo.</h1>
       <p className="lead">Pega el link de una tienda online. Leemos su catálogo público, la IA encuentra a sus competidores, compara productos equivalentes y te mostramos dónde está caro, dónde está barato y qué espacios del mercado no está cubriendo.</p>
       <form className="urlform" onSubmit=${go}>
-        <label htmlFor="q-url">Dirección de la tienda</label>
+        <label htmlFor="q-url">Dirección de la tienda <${Help} k="url" /></label>
         <div className="urlrow"><${Icon} n="store" /><input id="q-url" type="text" inputMode="url" autoComplete="url" placeholder="https://mitienda.com" value=${url} onInput=${(e) => setUrl(e.target.value)} /><button className="btn primary" type="submit" disabled=${busy || !url.trim()}>${busy ? 'Preparando…' : 'Analizar'}<${Icon} n="arrow" /></button></div>
         ${err ? html`<div className="err" role="alert">${err}</div>` : null}
         <div className="hint">Funciona con Shopify, VTEX, WooCommerce y la mayoría de tiendas que publican sus productos. Si tu tienda no se puede leer, podrás subir un archivo o conectarla. El análisis toma entre 5 y 10 minutos y queda disponible 7 días.</div>
       </form>
+      <section className="sheet"><span className="eyebrow">Así funciona</span>
+        <ol className="how">${PHASES.map(([k, t]) => html`<li key=${k}><b>${t}</b><span>${(TP.guide.gloss('ph_' + k) || [])[1]}</span></li>`)}</ol>
+        <p className="sm muted">Verás cada fase mientras avanza. En la tercera te pediremos confirmar quiénes son tus competidores; mientras terminamos, podrás contarnos tu estrategia.</p></section>
       <ul className="checks"><li className="ok"><${Icon} n="check" s=${14} />Solo usamos información pública de las tiendas: productos, precios y fichas. Respetamos robots.txt.</li><li className="ok"><${Icon} n="check" s=${14} />Sin registro ni configuración.</li><li className="ok"><${Icon} n="check" s=${14} />Cada recomendación muestra su evidencia; si no hay evidencia, no recomendamos.</li></ul>
     </div></div>`;
   }
@@ -215,7 +221,7 @@
     const det = phaseDetail(p);
     return html`<ol className="proc" aria-label="Fases del análisis">${PHASES.map(([k, t], i) => {
       const cls = i < cur ? 'done' : i === cur ? (waiting ? 'wait' : failed ? 'fail' : 'run') : '';
-      return html`<li key=${k} className=${'procrow ' + cls} aria-current=${i === cur ? 'step' : undefined}><span className="st">${i < cur ? html`<${Icon} n="check" s=${12} />` : i === cur && waiting ? '!' : i === cur && failed ? html`<${Icon} n="x" s=${12} />` : ''}</span><b>${t}</b><span className="res">${det[k] || (i === cur && waiting ? 'Necesitamos tu respuesta' : '')}</span></li>`;
+      return html`<li key=${k} className=${'procrow ' + cls} aria-current=${i === cur ? 'step' : undefined}><span className="st">${i < cur ? html`<${Icon} n="check" s=${12} />` : i === cur && waiting ? '!' : i === cur && failed ? html`<${Icon} n="x" s=${12} />` : ''}</span><b>${t} <${Help} k=${'ph_' + k} /></b><span className="res">${det[k] || (i === cur && waiting ? 'Necesitamos tu respuesta' : '')}</span></li>`;
     })}</ol>`;
   }
 
@@ -250,7 +256,7 @@
     else if (failed) action = html`<div className="sheet"><${Note} tone="warn">${st.error}<//><div className="ob-actions"><button className="btn primary" type="button" onClick=${onReset}>Analizar otra tienda</button></div></div>`;
     const showStrategy = !waiting && !failed && (PHASE_IDX[phase] || 0) >= 3;
     return html`<div className="ob"><div className="ob-in wide">
-      <div className="ob-top"><div className="brand"><img src="/brand/tita-mark.svg" alt="" width="24" height="24" /><span className="wm">TITA MEDIA</span><span className="prod">Pricing Intelligence 360°</span></div><span className="muted sm">Puedes dejar esta pestaña abierta: el análisis avanza mientras la ves.</span></div>
+      <div className="ob-top"><div className="brand"><img src="/brand/tita-mark.svg" alt="" width="24" height="24" /><span className="wm">Tita Media</span><span className="prod">Pricing Intelligence 360°</span></div><span className="muted sm">Puedes dejar esta pestaña abierta: el análisis avanza mientras la ves.</span></div>
       <div className="ob-head"><h2>${title}</h2></div>
       <${Phases} p=${p} status=${st && st.status} />
       ${action}

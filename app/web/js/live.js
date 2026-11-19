@@ -1,4 +1,4 @@
-/* TITA Pricing Intelligence 360° — cliente de la API: sesión, documentos de la cuenta,
+/* Tita Pricing Intelligence 360° — cliente de la API: sesión, documentos de la cuenta,
    trabajos en segundo plano, permisos y descargas. */
 (function () {
   'use strict';

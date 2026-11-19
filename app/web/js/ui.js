@@ -1,4 +1,4 @@
-/* TITA Pricing Intelligence 360° — componentes base y visualizaciones (SVG propio). */
+/* Tita Pricing Intelligence 360° — componentes base y visualizaciones (SVG propio). */
 (function () {
   'use strict';
   const { useState, useMemo, useRef } = React;

@@ -2,7 +2,7 @@
   "name": "tita-pricing-intelligence",
   "version": "1.0.0",
   "private": true,
-  "description": "TITA Pricing Intelligence 360° — plataforma SaaS multi-cliente de inteligencia de precios",
+  "description": "Tita Pricing Intelligence 360° — plataforma SaaS multi-cliente de inteligencia de precios",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",

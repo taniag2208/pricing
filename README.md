@@ -1,4 +1,4 @@
-# TITA Pricing Intelligence 360°
+# Tita Pricing Intelligence 360°
 
 - `demo/` — demo comercial navegable con datos ficticios. Página estática, lista para Vercel.
 - `app/` — la plataforma con servidor, base de datos, consola de Tita y vista del cliente. Ver `app/README.md`.

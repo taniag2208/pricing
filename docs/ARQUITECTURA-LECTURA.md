@@ -1,6 +1,6 @@
 # Motor de lectura e inteligencia competitiva
 
-Este documento describe cómo TITA Pricing Intelligence 360° lee una tienda, cómo evalúa a los competidores y qué protecciones aplica. El código está en `app/server/`.
+Este documento describe cómo Tita Pricing Intelligence 360° lee una tienda, cómo evalúa a los competidores y qué protecciones aplica. El código está en `app/server/`.
 
 ## 1. Diagnóstico inicial (fase 1)
 
