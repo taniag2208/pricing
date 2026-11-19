@@ -29,9 +29,9 @@ async function run(budgetMs) {
       const r = { host, sector, market };
       try {
         const res = await crawl('https://' + host, null, { maxPages: 1, sitemapMax: 25, textMax: 15, deadline: Math.min(end, a + 50000), ai: ai.configured() ? ai.facade({ kind: 'bench' }) : null });
-        Object.assign(r, { ok: res.items.length >= 5, method: res.platform, n: res.items.length, reason: res.items.length >= 5 ? null : 'no_data' });
+        Object.assign(r, { ok: res.items.length >= 5, method: require('./scrape').METHOD_LABEL[res.method] || res.method, platform: res.platform, n: res.items.length, status: res.diag.status, reason: res.items.length >= 5 ? null : 'no_data', attempts: res.diag.attempts.map((a) => a.method + ':' + a.status + ' ' + String(a.detail || '').slice(0, 60)) });
         if (r.ok && !/departamentos|Tecnología|Papelería/.test(sector)) await registry.remember({ url: res.origin, market, sector, platform: res.platform, items: res.items, ok: true });
-      } catch (e) { Object.assign(r, { ok: false, reason: e.code === 'unreachable' ? 'unreachable' : e.code === 'billing' ? 'ia_sin_saldo' : e.reason || 'error', detail: String(e.message).slice(0, 240) }); }
+      } catch (e) { Object.assign(r, { ok: false, reason: e.code === 'unreachable' ? 'unreachable' : e.code === 'billing' ? 'ia_sin_saldo' : e.reason || e.code || 'error', detail: String(e.message).slice(0, 240), attempts: ((e.diag || {}).attempts || []).map((a) => a.method + ':' + a.status + ' ' + String(a.detail || '').slice(0, 60)) }); }
       r.ms = Date.now() - a;
       results.push(r);
       if (Date.now() > end) break;

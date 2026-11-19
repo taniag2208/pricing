@@ -56,12 +56,16 @@ function checkUrl(raw) {
 }
 
 // Resolución previa para dar un diagnóstico claro (no reemplaza la validación al conectar).
-async function resolveHost(hostname) {
+async function resolveHost(hostname, retry = 1) {
   try {
     const list = await dns.promises.lookup(hostname, { all: true });
     if (list.some((a) => ipBlocked(a.address))) return { ok: false, code: 'blocked_destination' };
     return { ok: true, addresses: list.map((a) => a.address) };
-  } catch (e) { return { ok: false, code: e.code === 'ENOTFOUND' || e.code === 'EAI_AGAIN' ? 'dns_not_found' : 'dns_error' }; }
+  } catch (e) {
+    // un fallo de DNS momentáneo no debe decir que el dominio no existe: se reintenta una vez
+    if (retry > 0) { await new Promise((r) => setTimeout(r, 700)); return resolveHost(hostname, retry - 1); }
+    return { ok: false, code: e.code === 'ENOTFOUND' || e.code === 'EAI_AGAIN' ? 'dns_not_found' : 'dns_error' };
+  }
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -88,18 +92,18 @@ async function safeFetch(rawUrl, { headers = {}, timeout = 25000, retries = 1, m
         break;
       }
       // lectura con límite de tamaño
-      let text = '';
+      let text = '', truncated = false;
       if (r.body) {
         const reader = r.body.getReader(); const dec = new TextDecoder(); let size = 0;
         for (;;) {
           const { done, value } = await reader.read(); if (done) break;
           size += value.byteLength;
-          if (size > maxBytes) { try { await reader.cancel(); } catch (e) { /* cortado */ } break; }
+          if (size > maxBytes) { truncated = true; try { await reader.cancel(); } catch (e) { /* cortado */ } break; }
           text += dec.decode(value, { stream: true });
         }
         text += dec.decode();
       }
-      const res = { ok: r.ok, status: r.status, url, headers: r.headers, text, ms: Date.now() - t0, redirects };
+      const res = { ok: r.ok, status: r.status, url, headers: r.headers, text, ms: Date.now() - t0, redirects, truncated };
       if (RETRY_STATUS.has(r.status) && attempt < retries) { attempt++; await sleep(Math.min(8000, 800 * 2 ** attempt + Math.random() * 300)); continue; }
       return res;
     } catch (e) {

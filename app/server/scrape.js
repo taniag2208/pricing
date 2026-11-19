@@ -20,8 +20,11 @@ class ReadError extends Error {
   constructor(code, message, extra) { super(message); Object.assign(this, { code }, extra || {}); }
 }
 
+// Las APIs de catálogo pueden pesar mucho (VTEX devuelve ~9 MB por 50 productos con imágenes y variantes): límite mayor para JSON.
+const API_MAX_BYTES = Number(process.env.FETCH_API_MAX_BYTES || 40 * 1024 * 1024);
 async function get(url, accept, ms) {
-  return safeFetch(url, { headers: { 'User-Agent': UA, Accept: accept || 'application/json', 'Accept-Language': 'es-CO,es;q=0.9,en;q=0.5' }, timeout: ms || 25000, retries: 1 });
+  const json = !accept || /json/.test(accept);
+  return safeFetch(url, { headers: { 'User-Agent': UA, Accept: accept || 'application/json', 'Accept-Language': 'es-CO,es;q=0.9,en;q=0.5' }, timeout: ms || 25000, retries: 1, ...(json ? { maxBytes: API_MAX_BYTES } : {}) });
 }
 
 /* ---------- robots.txt (RFC 9309: 4xx = sin restricciones; 5xx o sin respuesta = todo restringido) ---------- */
@@ -287,7 +290,7 @@ async function readOrigin(origin, opts, diag, home, onProgress) {
     let r;
     try { r = await get(u.href); } catch (e) { http.net++; a.detail = e.code === 'timeout' ? 'tiempo agotado' : 'sin conexión (' + e.code + ')'; close(a); continue; }
     if ([401, 403, 429].includes(r.status)) { http.blocked++; a.detail = 'acceso restringido (HTTP ' + r.status + ')'; close(a, 'blocked'); continue; }
-    let j; try { j = JSON.parse(r.text); } catch (e) { a.detail = 'no disponible (HTTP ' + r.status + ')'; close(a); continue; }
+    let j; try { j = JSON.parse(r.text); } catch (e) { a.detail = r.truncated ? 'respuesta demasiado grande (cortada en ' + Math.round(r.text.length / 1048576) + ' MB)' : 'no disponible (HTTP ' + r.status + ')'; close(a); continue; }
     if (P.count(j) < 0) { a.detail = 'formato distinto'; close(a); continue; }
     const by = {}; let raw = 0, parsed = 0;
     const add = (json) => { raw += P.count(json); TP.ingest.parseText(JSON.stringify(json), origin).items.forEach((p) => { parsed++; if (keep(p.name + ' ' + p.label + ' ' + (p.url || ''))) by[p.id] = p; }); };
@@ -354,7 +357,16 @@ async function crawl(storeUrl, onProgress, opts = {}) {
   if (!origin) throw fail(new ReadError('invalid_url', 'La dirección no es válida'));
   try {
     const u0 = checkUrl(origin);
-    if (!ALLOW_PRIVATE) { const h = await resolveHost(u0.hostname); if (!h.ok) throw new ReadError(h.code === 'blocked_destination' ? 'invalid_url' : 'unreachable', h.code === 'blocked_destination' ? 'Esa dirección no está permitida' : 'El dominio no existe o no se puede resolver', { reason: h.code }); }
+    if (!ALLOW_PRIVATE) {
+      let h = await resolveHost(u0.hostname);
+      // "tienda.com.co" sin www puede no existir aunque "www.tienda.com.co" sí (y al revés): se prueba la variante antes de rendirse
+      if (!h.ok && h.code !== 'blocked_destination') {
+        const altHost = u0.hostname.startsWith('www.') ? u0.hostname.slice(4) : 'www.' + u0.hostname;
+        const h2 = await resolveHost(altHost);
+        if (h2.ok) { origin = u0.protocol + '//' + altHost; h = h2; }
+      }
+      if (!h.ok) throw new ReadError(h.code === 'blocked_destination' ? 'invalid_url' : 'unreachable', h.code === 'blocked_destination' ? 'Esa dirección no está permitida' : 'El dominio no existe o no se puede resolver', { reason: h.code });
+    }
   } catch (e) { throw fail(e instanceof ReadError ? e : new ReadError('invalid_url', 'Esa dirección no está permitida')); }
   try { const m = new URL(/^https?:/i.test(storeUrl) ? storeUrl : 'https://' + storeUrl).pathname.match(/^\/([a-z]{2})(\/(es|es-[a-z]{2}|es_[a-z]{2}))?(\/|$)/i); if (m) opts = { ...opts, prefix: '/' + m[1].toLowerCase() + (m[2] || '') }; } catch (e) { /* sin ruta */ }
   step('connect');

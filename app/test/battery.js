@@ -41,6 +41,15 @@ const add = (r) => { results.push(r); console.log((r.ok ? 'APROBADO ' : 'FALLÓ 
     try { await readAuthenticated('woocommerce', { store: 'http://127.0.0.1:4513', key: 'ck_' + 'c'.repeat(24), secret: 'cs_' + 'd'.repeat(24) }); } catch (e) { bad = e.code; }
     add({ id: 'L13', caso: 'Conexión autenticada de la tienda propia (WooCommerce REST)', esperado: 'lee el catálogo con credenciales válidas; con credenciales inválidas responde auth_failed; no guarda credenciales', obtenido: (r.items ? r.items.length + ' productos · ' + r.method : 'error ' + r.err) + ' · credenciales inválidas: ' + bad, metodo: r.method || '—', productos: r.items ? r.items.length : 0, motivo: 'credenciales de un solo uso', ms: Date.now() - t0, ia: 0, ok: !!(r.items && r.items.length === 31 && r.method === 'auth_woocommerce' && bad === 'auth_failed') });
   }
+  {
+    // regresión: VTEX devuelve ~9 MB por 50 productos; el límite de descarga cortaba el JSON
+    const big = 'x'.repeat(4000);
+    const body = JSON.stringify(Array.from({ length: 50 }, (_, i) => ({ productId: String(i), productName: 'Tenis ' + i, description: big, link: 'http://x/' + i + '/p', categories: ['/Calzado/Tenis/'], items: [{ itemId: String(i), images: Array.from({ length: 60 }, () => ({ url: big })), sellers: [{ commertialOffer: { Price: 100000 + i, ListPrice: 120000, AvailableQuantity: 3 } }] }] })));
+    const bs = require('http').createServer((q, r) => { if (q.url.startsWith('/api/catalog_system')) { r.statusCode = 206; r.setHeader('Content-Type', 'application/json'); return r.end(q.url.includes('_from=0') ? body : '[]'); } if (q.url === '/robots.txt') return r.end('User-agent: *\n'); r.setHeader('Content-Type', 'text/html'); r.end('<html>vtexassets</html>'); });
+    await new Promise((r) => bs.listen(4514, r));
+    await read('L14', 'Respuesta de API muy pesada (VTEX, ' + (body.length / 1048576).toFixed(1) + ' MB por página, HTTP 206)', 'http://127.0.0.1:4514', 'se lee completa por la API de VTEX', (r) => r && r.method === 'api_vtex' && r.items.length === 50, { maxPages: 2 });
+    bs.close();
+  }
   // SSRF: en un proceso sin la excepción de pruebas, las direcciones internas se bloquean
   {
     const t0 = Date.now();
