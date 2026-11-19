@@ -57,7 +57,7 @@ function anthropic(port, log) {
       let content, stop = 'end_turn';
       if ((j.tools && j.tools.length && String(j.tools[0].type || '').startsWith('web_search')) || /sonar/.test(j.model || '')) {
         if (anthropic.noComps) { log.push({ search: 'nocomps' }); content = [{ type: 'text', text: JSON.stringify({ country: 'CO', storeName: 'Marca Propia', competitors: [{ name: 'Muerta 1', url: 'http://127.0.0.1:4998' }, { name: 'Muerta 2', url: 'http://127.0.0.1:4997' }] }) }]; } else
-        content = [{ type: 'text', text: JSON.stringify({ country: 'CO', storeName: 'Marca Propia', competitors: [{ name: 'Alfa', url: 'http://127.0.0.1:4102' }, { name: 'Sin catálogo', url: 'http://127.0.0.1:4999' }, { name: 'Beta', url: 'http://127.0.0.1:4103' }, { name: 'Gama', url: 'http://127.0.0.1:4104' }] }) }];
+        content = [{ type: 'text', text: JSON.stringify({ country: 'CO', storeName: 'Marca Propia', competitors: [{ name: 'Alfa', url: 'http://127.0.0.1:4102' }, { name: 'Sin catálogo', url: 'http://127.0.0.1:4999' }, { name: 'Beta', url: 'http://127.0.0.1:4103' }, { name: 'Gama', url: 'http://127.0.0.1:4104' }, { name: 'Extranjera', url: 'http://127.0.0.1:4107' }, { name: 'Lenta', url: 'http://127.0.0.1:4109' }] }) }];
       } else if (j.tools && j.tools.length) {
         const hasResult = Array.isArray(last.content) && last.content.some((b) => b.type === 'tool_result');
         if (!hasResult) { content = [{ type: 'tool_use', id: 'tu_1', name: 'resumen_categorias', input: {} }]; stop = 'tool_use'; }

@@ -3,6 +3,7 @@
 const { q } = require('./db');
 const { crawl } = require('./scrape');
 const ai = require('./ai');
+const registry = require('./registry');
 
 const STORES = [
   ['bosi.com.co', 'Calzado y marroquinería', 'CO'], ['mariohernandez.com.co', 'Calzado y marroquinería', 'CO'], ['velez.com.co', 'Calzado y marroquinería', 'CO'],
@@ -27,8 +28,9 @@ async function run(budgetMs) {
       const [host, sector, market] = s, a = Date.now();
       const r = { host, sector, market };
       try {
-        const res = await crawl('https://' + host, null, { maxPages: 1, sitemapMax: 12, textMax: 15, deadline: Math.min(end, a + 50000), ai: ai.configured() ? ai.facade({ kind: 'bench' }) : null });
+        const res = await crawl('https://' + host, null, { maxPages: 1, sitemapMax: 25, textMax: 15, deadline: Math.min(end, a + 50000), ai: ai.configured() ? ai.facade({ kind: 'bench' }) : null });
         Object.assign(r, { ok: res.items.length >= 5, method: res.platform, n: res.items.length, reason: res.items.length >= 5 ? null : 'no_data' });
+        if (r.ok && !/departamentos|Tecnología|Papelería/.test(sector)) await registry.remember({ url: res.origin, market, sector, platform: res.platform, items: res.items, ok: true });
       } catch (e) { Object.assign(r, { ok: false, reason: e.code === 'unreachable' ? 'unreachable' : e.code === 'billing' ? 'ia_sin_saldo' : e.reason || 'error', detail: String(e.message).slice(0, 240) }); }
       r.ms = Date.now() - a;
       results.push(r);

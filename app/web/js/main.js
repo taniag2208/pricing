@@ -379,18 +379,21 @@
     const toggle = (u) => setSel((x) => { const n = new Set(x); n.has(u) ? n.delete(u) : n.add(u); return n; });
     const send = async (e) => { e.preventDefault(); setBusy(true); setErr(''); try { await L.api('POST', '/quick/' + org + '/comps', { urls }); onSent(); } catch (x) { setErr(x.message); setBusy(false); } };
     const tried = (p.tried || []).map(hostName);
+    const rej = p.rejected || [];
     return html`<form className="urlform" onSubmit=${send}>
       ${confirm ? html`<p>Encontramos estas tiendas que venden lo mismo que ${p.storeName || 'la tienda'}. Desmarca las que no sean competencia directa y agrega las que falten.</p>
-        <ul className="checks">${cands.map((c) => html`<li key=${c.url}><label className="tgl"><input type="checkbox" checked=${sel.has(c.url)} onChange=${() => toggle(c.url)} /><b>${c.name}</b> <span className="muted">${hostName(c.url)}</span></label></li>`)}</ul>`
-      : html`<${Note} tone="warn">No encontramos competidores cuyo catálogo podamos leer${tried.length ? ' (probamos ' + tried.slice(0, 10).join(', ') + ')' : ''}. Si conoces a tus competidores, escribe sus links y seguimos con el análisis.<//>`}
+        <ul className="checks">${cands.map((c) => html`<li key=${c.url}><label className="tgl"><input type="checkbox" checked=${sel.has(c.url)} onChange=${() => toggle(c.url)} /><b>${c.name}</b> <span className="muted">${hostName(c.url)}</span>${c.source === 'registro' ? html` <${Badge} tone="ok">catálogo verificado<//>` : null}</label></li>`)}</ul>`
+      : html`<${Note} tone="warn">No encontramos competidores cuyo catálogo podamos leer. Si conoces a tus competidores, escribe sus links y seguimos con el análisis.<//>`}
+      ${rej.length ? html`<details className="manual" open=${!confirm}><summary className="sm">${rej.length} tienda${rej.length === 1 ? '' : 's'} probada${rej.length === 1 ? '' : 's'} que no pudimos usar</summary><ul className="checks">${rej.map((r) => html`<li key=${r.url} className="no"><${Icon} n="x" s=${14} /><span><b>${r.name}</b> <span className="muted">${hostName(r.url)}</span>: ${r.why}</span></li>`)}</ul></details>` : null}
       <label className="fld" htmlFor="qc-u"><span>${confirm ? 'Agregar otros competidores (opcional, uno por línea)' : 'Links de 2 a 5 competidores (uno por línea)'}</span><textarea id="qc-u" rows=${confirm ? 3 : 5} placeholder=${'marca1.com\nmarca2.com.co'} value=${txt} onInput=${(e) => setTxt(e.target.value)}></textarea></label>
       ${err ? html`<div className="err" role="alert">${err}</div>` : null}
       <div className="ob-actions"><button className="btn ghost" type="button" onClick=${onReset}>Analizar otra tienda</button><button className="btn primary" type="submit" disabled=${busy || !urls.length}>${busy ? 'Enviando…' : confirm ? 'Analizar con ' + urls.length + ' competidor' + (urls.length === 1 ? '' : 'es') : 'Continuar con estos competidores'}</button></div>
     </form>`;
   }
-  const OWN_REASON = { unreachable: 'No pudimos conectarnos con la tienda. Revisa que la dirección esté bien escrita.', robots: 'La tienda no permite que programas lean su catálogo (lo indica en su archivo robots.txt) y respetamos esa decisión.', blocked: 'La tienda bloquea las lecturas automáticas.', no_data: 'La tienda no publica su catálogo en un formato que podamos leer automáticamente.' };
-  function OwnAsk({ org, p, onReset, onSent }) {
-    const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
+  const OWN_REASON = { timeout: 'La tienda tardó demasiado en responder. Puede estar lenta en este momento: intenta de nuevo en unos minutos o sube el catálogo en un archivo.', country_selector: 'Esta dirección es una página para elegir país, no una tienda. Elige el sitio del país que quieres analizar.', unreachable: 'No pudimos conectarnos con la tienda. Revisa que la dirección esté bien escrita.', robots: 'La tienda no permite que programas lean su catálogo (lo indica en su archivo robots.txt) y respetamos esa decisión.', blocked: 'La tienda bloquea las lecturas automáticas.', no_data: 'La tienda no publica su catálogo en un formato que podamos leer automáticamente.' };
+  function OwnAsk({ org, p, onReset, onSent, onRetry }) {
+    const [err, setErr] = useState(''); const [busy, setBusy] = useState(false); const [fix, setFix] = useState('');
+    const useUrl = async (url) => { setBusy(true); setErr(''); try { await L.api('POST', '/quick/' + org + '/own', { url }); onRetry(); } catch (x) { setErr(x.message); setBusy(false); } };
     const pick = async (e) => {
       const f = e.target.files && e.target.files[0]; if (!f) return;
       setBusy(true); setErr('');
@@ -404,7 +407,10 @@
     };
     return html`<div className="urlform">
       <${Note} tone="warn">${OWN_REASON[p.reason] || OWN_REASON.no_data}<//>
-      <p>Puedes seguir con el análisis subiendo el catálogo en un archivo <b>CSV o Excel</b> con columnas de <b>nombre</b>, <b>precio</b> y, si la tienes, <b>categoría</b> y <b>precio de promoción</b>. La exportación de productos de cualquier tienda en línea sirve.</p>
+      ${p.redirect ? html`<p className="sm muted">La dirección redirige a ${p.redirect}.</p>` : null}
+      ${p.countries ? html`<div className="chips">${p.countries.map((c) => html`<button key=${c.url} type="button" className="chip" disabled=${busy} onClick=${() => useUrl(c.url)}>${c.label} <span className="muted">${hostName(c.url)}</span></button>`)}</div>` : null}
+      <form className="urlrow" onSubmit=${(e) => { e.preventDefault(); if (fix.trim()) useUrl(fix.trim()); }}><input aria-label="Otra dirección de la tienda" placeholder="O escribe otra dirección de la tienda" value=${fix} onInput=${(e) => setFix(e.target.value)} /><button className="btn sm" type="submit" disabled=${busy || !fix.trim()}>Probar esta dirección</button></form>
+      <p>${p.countries ? 'O sigue' : 'Puedes seguir'} con el análisis subiendo el catálogo en un archivo <b>CSV o Excel</b> con columnas de <b>nombre</b>, <b>precio</b> y, si la tienes, <b>categoría</b> y <b>precio de promoción</b>. La exportación de productos de cualquier tienda en línea sirve.</p>
 <div><label className=${'btn primary' + (busy ? ' disabled' : '')}><input type="file" className="sr" accept=".csv,.txt,.xlsx,.xls" onChange=${pick} />${busy ? 'Leyendo archivo…' : 'Subir catálogo (CSV o Excel)'}</label></div>
       ${err ? html`<div className="err" role="alert">${err}</div>` : null}
       <div className="ob-actions"><button className="btn ghost" type="button" onClick=${onReset}>Analizar otra tienda</button></div>
@@ -432,8 +438,8 @@
     const detail = { own: p.own != null ? p.own + ' productos tomados para el análisis' + (p.ownTotal > p.own ? ' (de ' + p.ownTotal + ' publicados)' : '') + (p.platform ? ' · ' + p.platform : '') : '', discover: p.candidates ? p.candidates.length + ' candidatos: ' + p.candidates.map((c) => c.name).join(', ') : '', comps: p.found ? p.found.map((f) => f.name + ' (' + f.n + ')').join(', ') || 'Probando tiendas…' : '', cats: p.cats ? p.cats.join(', ') : '', classify: p.classified != null ? p.classified + ' clasificados · ' + (p.left || 0) + ' en cola' : '' };
     return html`<div className="ob"><div className="ob-in wide">
       <div className="brandmark"><span className="logo">T</span>TITA Pricing Intelligence <b>360°</b></div>
-      <div className="ob-head"><h2>${st && st.status === 'waiting' ? (p.phase === 'need_own' ? 'Necesitamos tu catálogo' : p.phase === 'confirm_comps' ? 'Confirma tus competidores' : '¿Quiénes son tus competidores?') : st && st.status === 'failed' ? 'No pudimos completar el análisis' : 'Analizando ' + (me.org ? me.org.name : 'la tienda') + '…'}</h2><span className="muted sm">Puedes dejar esta pestaña abierta; el análisis avanza mientras la ves.</span></div>
-      ${st && st.status === 'waiting' && p.phase === 'need_own' ? html`<${OwnAsk} org=${org} p=${p} onReset=${onReset} onSent=${() => { setSt({ status: 'queued', progress: { ...p, phase: 'discover' } }); setKick((x) => x + 1); }} />` :
+      <div className="ob-head"><h2>${st && st.status === 'waiting' ? (p.phase === 'need_own' ? (p.countries ? 'Elige el país de la tienda' : 'Necesitamos tu catálogo') : p.phase === 'confirm_comps' ? 'Confirma tus competidores' : '¿Quiénes son tus competidores?') : st && st.status === 'failed' ? 'No pudimos completar el análisis' : 'Analizando ' + (me.org ? me.org.name : 'la tienda') + '…'}</h2><span className="muted sm">Puedes dejar esta pestaña abierta; el análisis avanza mientras la ves.</span></div>
+      ${st && st.status === 'waiting' && p.phase === 'need_own' ? html`<${OwnAsk} org=${org} p=${p} onReset=${onReset} onSent=${() => { setSt({ status: 'queued', progress: { ...p, phase: 'discover' } }); setKick((x) => x + 1); }} onRetry=${() => { setSt({ status: 'queued', progress: {} }); setKick((x) => x + 1); }} />` :
         st && st.status === 'waiting' ? html`<${CompsAsk} key=${p.phase + (p.candidates || []).length} org=${org} p=${p} onReset=${onReset} onSent=${() => { setSt({ status: 'queued', progress: { ...p, phase: 'comps', found: p.found || [] } }); setKick((x) => x + 1); }} />` : st && st.status === 'failed' ? html`<div><${Note} tone="warn">${st.error}<//><div className="ob-actions"><button className="btn primary" type="button" onClick=${onReset}>Analizar otra tienda</button></div></div>` : html`<div className="proc">${PHASES.map(([k, t], i) => html`<div key=${k} className=${'procrow ' + (i < cur ? 'done' : i === cur ? 'run' : '')}><span className="st">${i < cur ? html`<${Icon} n="check" s=${12} />` : ''}</span><b>${t}</b><span className="res">${detail[k] || ''}</span></div>`)}</div>`}
     </div></div>`;
   }

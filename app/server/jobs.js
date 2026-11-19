@@ -7,17 +7,18 @@ const ai = require('./ai');
 const { crawl } = require('./scrape');
 const { id, slug } = require('./util');
 const TP = require('./shared');
+const registry = require('./registry');
+const { keywordsOf } = require('./util');
 const I = TP.ingest;
 
 const CHUNK = 150;
-// Palabras que describen el catálogo propio (tipos de producto), para leer de la competencia solo lo comparable.
-const STOP = new Set('para con sin por los las del una uno unos unas este esta mujer hombre hombres mujeres nino nina ninos ninas unisex talla tallas color negro negra blanco blanca azul rojo roja gris cafe beige verde rosa dorado plata nuevo nueva coleccion referencia producto productos tienda oferta descuento envio gratis pack combo kit set categoria inicio home sale liquidacion'.split(' '));
-function keywordsOf(items) {
-  const n = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-  const cnt = {};
-  items.forEach((p) => { const seen = new Set(); (n(p.label) + ' ' + n(p.name).split(/\s+/).slice(0, 3).join(' ')).split(/[^a-z]+/).forEach((w) => { if (w.length < 4 || STOP.has(w) || seen.has(w)) return; seen.add(w); cnt[w] = (cnt[w] || 0) + 1; }); });
-  return Object.entries(cnt).filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]).slice(0, 25).map(([w]) => (w.length > 5 && /s$/.test(w) ? w.slice(0, -1) : w));
-}
+const COUNTRY = { co: ['CO', 'Colombia', 'pesos colombianos (COP)'], mx: ['MX', 'México', 'pesos mexicanos (MXN)'], pe: ['PE', 'Perú', 'soles (PEN)'], cl: ['CL', 'Chile', 'pesos chilenos (CLP)'] };
+const saleOf = (p) => (p.promo && p.promo < p.price ? p.promo : p.price);
+const medianOf = (a) => { const s = a.filter((x) => x > 0).sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : 0; };
+// Motivo legible de por qué no se pudo leer una tienda.
+const failWhy = (e) => (e.code === 'timeout' ? 'tardó demasiado en responder' : e.reason === 'country_selector' ? 'es una página para elegir país, no una tienda' : e.code === 'unreachable' ? 'la dirección no existe o no responde' : e.reason === 'robots' ? 'su robots.txt no permite leer el catálogo' : e.reason === 'blocked' ? 'bloquea las lecturas automáticas' : 'no publica su catálogo en un formato legible');
+// Límite duro de tiempo por tienda: una tienda lenta no puede detener el análisis.
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error('Tiempo agotado'), { code: 'timeout' })), ms))]);
 const BATCH = Number(process.env.CLASSIFY_BATCH || ((process.env.AI_PROVIDER || '').toLowerCase() === 'gateway' ? 20 : 40));
 const MAX_BATCHES = Number(process.env.CLASSIFY_MAX_BATCHES || 150);
 const CONCURRENCY = Number(process.env.JOB_CONCURRENCY || 2);
@@ -127,11 +128,12 @@ const RUN = {
     if (phase === 'own') {
       const s = await store.get(org, 'stores', 'own');
       let res;
-      try { res = await crawl(s.url, null, { maxPages: Number(process.env.QUICK_OWN_PAGES || 3), sitemapMax: Number(process.env.QUICK_OWN_MAX || 90), deadline: job.deadline - 60000, ai: ai.facade({ ...owner, kind: 'quick-extract' }) }); }
+      try { res = await withTimeout(crawl(s.url, null, { maxPages: Number(process.env.QUICK_OWN_PAGES || 3), sitemapMax: Number(process.env.QUICK_OWN_MAX || 90), deadline: job.deadline - 60000, ai: ai.facade({ ...owner, kind: 'quick-extract' }) }), 170000); }
       catch (e) {
         if (e.code === 'billing') throw e;
         // Sin salida automática: se le pide al usuario el catálogo en un archivo (CSV o Excel) en vez de fallar.
-        await save({ phase: 'need_own', reason: e.code === 'unreachable' ? 'unreachable' : e.reason || 'no_data' });
+        const asked = TP.ingest.hostOf(s.url), real = e.origin ? TP.ingest.hostOf(e.origin) : asked;
+        await save({ phase: 'need_own', reason: e.code === 'unreachable' ? 'unreachable' : e.code === 'timeout' ? 'timeout' : e.reason || 'no_data', redirect: real !== asked ? real : null, countries: e.countries || null });
         return { wait: true };
       }
       const items = cap(res.items, Number(process.env.QUICK_OWN_MAX || 90));
@@ -150,17 +152,30 @@ const RUN = {
       const tried = st.tried || [];
       let out = {};
       try {
-        out = await ai.research('Eres analista de pricing de retail en Latinoamérica. Usa la búsqueda web para encontrar las tiendas online que compiten directamente con esta tienda.\n\n' +
-          'Tienda: ' + s.url + ' (dominio .' + tld + ')\nCategorías del catálogo: ' + Object.entries(labels).sort((a, b) => b[1] - a[1]).slice(0, 8).map((x) => x[0]).join(', ') + '\nEjemplos de productos y precios: ' + own.slice(0, 15).map((p) => p.name + ' (' + p.price + ')').join('; ') + '\n\n' +
-          'Busca 10 a 12 marcas o tiendas competidoras directas: mismo país de venta, el MISMO tipo de producto (no otras categorías) y rango de precio parecido, cada una con su propia tienda online. Excluye marketplaces, grandes superficies y tiendas por departamentos (Mercado Libre, Amazon, Falabella, Linio, Dafiti, Éxito, Homecenter, Panamericana, Liverpool, Ripley, Paris, Walmart, Shein) y la propia tienda.\n' +
-          'Da solo dominios reales que conozcas con certeza (la página de inicio de la tienda, no redes sociales). Prioriza marcas cuya tienda corre en Shopify, VTEX o WooCommerce.\n' +
+        const topLabels = Object.entries(labels).sort((a, b) => b[1] - a[1]).slice(0, 6).map((x) => x[0]);
+        const country = COUNTRY[tld] || COUNTRY[(new URL(s.url).hostname.match(/\.(com\.)?([a-z]{2})$/) || [])[2]] || null;
+        const ctx = 'Tienda: ' + s.url + (country ? '\nPaís de venta: ' + country[1] + ' (precios en ' + country[2] + ')' : '') + '\nCategorías principales del catálogo: ' + topLabels.join(', ') + '\nEjemplos de productos y precios: ' + own.slice(0, 15).map((p) => p.name + ' (' + p.price + ')').join('; ') + '\n\n';
+        const rules = 'Excluye marketplaces, grandes superficies y tiendas por departamentos (Mercado Libre, Amazon, Falabella, Linio, Dafiti, Éxito, Homecenter, Panamericana, Liverpool, Ripley, Paris, Walmart, Shein, Temu) y la propia tienda.\n' +
+          'La URL debe ser la de la tienda de ese país (por ejemplo, el sitio de Colombia de una marca internacional, no el global). Da solo direcciones que encontraste en la búsqueda (no redes sociales).\n' +
           (tried.length ? 'Estas ya las probamos y NO sirven, no las repitas: ' + tried.join(', ') + '\n' : '') +
-          'Responde solo JSON: {"country": "CO"|"MX"|"PE"|"CL"|otro código ISO, "storeName": "nombre comercial de la tienda", "competitors": [{"name": "Marca", "url": "https://dominio-de-su-tienda"}]}', { ...owner, kind: 'quick-competitors', maxUses: 6 });
+          'Responde solo JSON: {"country": "CO"|"MX"|"PE"|"CL"|otro código ISO, "storeName": "nombre comercial de la tienda", "competitors": [{"name": "Marca", "url": "https://tienda-del-pais", "category": "categoría en la que compite"}]}';
+        // Dos búsquedas con enfoques distintos (por categoría y por marcas parecidas), en paralelo, para no depender de una sola respuesta.
+        const outs = await Promise.allSettled([
+          ai.research('Eres analista de pricing de retail en Latinoamérica. Usa la búsqueda web para encontrar las tiendas online que compiten directamente con esta tienda.\n\n' + ctx +
+            'Para cada una de las categorías principales busca 2 o 3 marcas o tiendas que vendan ESE tipo de producto en el MISMO país, con precios parecidos y tienda online propia. En total 10 a 12 distintas. ' + rules, { ...owner, kind: 'quick-competitors', maxUses: 6 }),
+          ai.research('Eres analista de mercado de retail. Busca en la web qué marcas compiten con esta tienda por el mismo cliente: marcas del mismo país (nacionales o internacionales con sitio local) que vendan productos parecidos al mismo nivel de precio. Incluye marcas locales medianas, no solo las más famosas. Da 8 a 10. \n\n' + ctx + rules, { ...owner, kind: 'quick-competitors', maxUses: 6 }),
+        ]);
+        const ok = outs.filter((r) => r.status === 'fulfilled').map((r) => r.value || {});
+        if (!ok.length && outs[0].reason && outs[0].reason.code === 'billing') throw outs[0].reason;
+        out = { country: (ok.find((o) => o.country) || {}).country, storeName: (ok.find((o) => o.storeName) || {}).storeName, competitors: ok.flatMap((o) => o.competitors || []) };
       } catch (e) { if (e.code === 'billing') throw e; out = {}; }
       const host = (u) => { try { return new URL(u).host.replace(/^www\./, ''); } catch (e) { return ''; } };
       const seen = new Set([host(s.url), ...tried.map(host)]);
-      const comps = (out.competitors || []).filter((c) => c && c.url && /^https?:\/\//.test(c.url) && host(c.url) && !seen.has(host(c.url)) && seen.add(host(c.url))).slice(0, 12);
       const market = ['CO', 'MX', 'PE', 'CL'].includes(out.country) ? out.country : (st.market || 'CO');
+      const fromWeb = (out.competitors || []).filter((c) => c && c.url && /^https?:\/\//.test(c.url) && host(c.url) && !seen.has(host(c.url)) && seen.add(host(c.url))).slice(0, 12);
+      const fromReg = await registry.suggest(market, keywordsOf(own), seen, 6).catch(() => []);
+      fromReg.forEach((c) => seen.add(host(c.url)));
+      const comps = [...fromWeb, ...fromReg].slice(0, 16);
       if (out.storeName) await store.put(org, 'stores', 'own', { ...s, name: out.storeName }, 'sistema');
       if (!comps.length) { await save({ phase: 'need_comps', market, storeName: out.storeName || st.storeName || s.name }); return { wait: true }; }
       // El usuario confirma, quita o agrega competidores antes de leerlos.
@@ -168,28 +183,34 @@ const RUN = {
       return { wait: true };
     }
     if (phase === 'comps') {
-      const found = st.found || [], tried = st.tried || [];
-      const want = Number(process.env.QUICK_COMPS || 5);
+      const found = st.found || [], tried = st.tried || [], rejected = st.rejected || [];
+      const want = Number(process.env.QUICK_COMPS || 6);
       if (!st.keywords) {
         const wsk = await store.snapshot(org);
         const own = Object.values(wsk.catalog).filter((c) => c.sid === 'own').flatMap((c) => c.items || []);
-        await save({ keywords: keywordsOf(own) });
+        await save({ keywords: keywordsOf(own), ownMed: medianOf(own.map(saleOf)) });
       }
       const todo = st.candidates.filter((c) => !tried.includes(c.url));
       for (let i = 0; i < todo.length && found.length < want && Date.now() < job.deadline - 100000; i += 4) {
         const group = todo.slice(i, i + 4);
         group.forEach((c) => tried.push(c.url));
+        await save({ tried }); // marcados antes de leer: si el paso se corta, no se vuelven a intentar en bucle
         const copts = { maxPages: Number(process.env.QUICK_COMP_PAGES || 6), enough: 150, keywords: st.keywords, sitemapMax: 50, deadline: job.deadline - 60000, ai: ai.facade({ ...owner, kind: 'quick-extract' }), textMax: 50 };
-        const got = await Promise.all(group.map((c) => crawl(c.url, null, copts).then((res) => ({ c, res }), () => null)));
+        const got = await Promise.all(group.map((c) => withTimeout(crawl(c.url, null, copts), Number(process.env.QUICK_COMP_TIMEOUT_MS || 60000)).then((res) => ({ c, res }), (err) => ({ c, err }))));
         for (const g of got) {
-          if (!g || g.res.items.length < 10 || found.length >= want) continue;
+          if (!g || found.length >= want) continue;
+          if (g.err) { if (g.err.code === 'billing') throw g.err; rejected.push({ name: g.c.name, url: g.c.url, why: failWhy(g.err) }); continue; }
+          // Validación: mismo idioma (sitio del país) y precios en la misma escala (misma moneda).
+          const why = g.res.items.length < 10 ? 'menos de 10 productos relacionados' : (() => { const seg = ((g.res.home && g.res.home.path) || '').split('/')[1] || ''; return /^[a-z]{2}$/i.test(seg) && seg.toLowerCase() !== String(st.market || 'co').toLowerCase() && !/^(es|en)$/i.test(seg) ? 'redirige al sitio de otro país (/' + seg + ')' : null; })() || (() => { const r = medianOf(g.res.items.map(saleOf)) / (st.ownMed || 1); return r < 1 / 15 || r > 15 ? 'precios en otra moneda o escala' : r < 1 / 6 || r > 6 ? 'nivel de precios muy distinto (' + (r > 1 ? Math.round(r) + ' veces más caro' : Math.round(1 / r) + ' veces más barato') + ')' : null; })();
+          if (why) { rejected.push({ name: g.c.name, url: g.c.url, why }); continue; }
+          registry.remember({ url: g.res.origin, market: st.market, platform: g.res.platform, items: g.res.items, ok: true });
           let sid = slug(g.c.name); if (sid === 'own' || found.some((f) => f.sid === sid)) sid += '-' + found.length;
           const items = cap(g.res.items, Number(process.env.QUICK_COMP_MAX || 120));
           const chunks = await saveCatalog(org, sid, items, 0);
           await store.put(org, 'stores', sid, { name: g.c.name, url: g.res.origin, role: 'comp', n: items.length, chunks, platform: g.res.platform, importedAt: new Date().toISOString() }, 'sistema');
           found.push({ sid, name: g.c.name, n: items.length });
         }
-        await save({ found, tried });
+        await save({ found, tried, rejected });
       }
       const pending = st.candidates.some((c) => !tried.includes(c.url)) && found.length < want;
       if (pending) return { partial: true };
@@ -203,9 +224,13 @@ const RUN = {
       const ws = await store.snapshot(org);
       const own = Object.values(ws.catalog).filter((c) => c.sid === 'own').flatMap((c) => c.items || []);
       const comps = Object.values(ws.catalog).filter((c) => c.sid !== 'own').flatMap((c) => c.items || []);
-      const cats = (await I.proposeCategories(ai.facade({ ...owner, kind: 'quick-categories' }), own, comps, { storeName: st.storeName || '' })).slice(0, Number(process.env.QUICK_CATS || 3));
+      const all = await I.proposeCategories(ai.facade({ ...owner, kind: 'quick-categories' }), own, comps, { storeName: st.storeName || '' });
+      // Se analizan las categorías con más productos comparables de ambos lados (por sinónimos en nombre y etiqueta).
+      const nrm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      const hits = (c, list) => list.filter((p) => { const t = nrm(p.name + ' ' + p.label); return c.syn.some((w) => w.length > 2 && t.includes(w)); }).length;
+      const cats = all.map((c) => ({ c, o: hits(c, own), m: hits(c, comps) })).sort((a, b) => Math.min(b.o, b.m) - Math.min(a.o, a.m) || b.o - a.o).slice(0, Number(process.env.QUICK_CATS || 4)).map((x) => x.c);
       for (const c of cats) await store.put(org, 'cats', c.id, { ...c, origin: 'ia', createdAt: new Date().toISOString() }, 'sistema');
-      await store.put(org, 'ws', 'config', { storeName: st.storeName || '', market: st.market || 'CO', objective: 'competitividad', comps: (st.found || []).map((f) => f.sid), cats: cats.map((c) => c.id), attrsOff: {}, franjas: {}, policy: { minMargin: 0.55, promoMinMargin: 0.35, rounding: 'psico', maxChange: 0.12 }, setupDone: false, step: 4, measured: null }, 'sistema');
+      await store.put(org, 'ws', 'config', { storeName: st.storeName || '', market: st.market || 'CO', objective: 'competitividad', comps: (st.found || []).map((f) => f.sid), cats: cats.map((c) => c.id), rejected: (st.rejected || []).slice(0, 20), attrsOff: {}, franjas: {}, policy: { minMargin: 0.55, promoMinMargin: 0.35, rounding: 'psico', maxChange: 0.12 }, setupDone: false, step: 4, measured: null }, 'sistema');
       await save({ phase: 'classify', cats: cats.map((c) => c.name) });
       return { partial: true };
     }
@@ -224,12 +249,20 @@ const RUN = {
         for (let i = 0; i < Math.min(3, Math.ceil(queue.length / BATCH)); i++) batches.push(queue.slice(i * BATCH, (i + 1) * BATCH).map((p) => ({ ...p, id: p.pid })));
         const results = await Promise.allSettled(batches.map((b) => I.classifyBatch(ai.facade({ ...owner, kind: 'quick-classify' }), cats, b)));
         let wrote = 0;
+        const misses = st.misses || {};
         for (let i = 0; i < batches.length; i++) {
-          if (results[i].status !== 'fulfilled') continue;
-          const out = {}; batches[i].forEach((p) => { if (results[i].value[p.id]) out[p.id] = results[i].value[p.id]; });
+          const ok = results[i].status === 'fulfilled';
+          if (!ok && results[i].reason && results[i].reason.code === 'billing') throw results[i].reason;
+          const out = {};
+          batches[i].forEach((p) => {
+            if (ok && results[i].value[p.id]) out[p.id] = results[i].value[p.id];
+            // Un producto que la IA no clasifica en 2 intentos queda fuera del análisis en vez de bloquearlo.
+            else if ((misses[p.id] = (misses[p.id] || 0) + 1) >= 2) out[p.id] = { cat: null, conf: 'baja', skipped: true };
+          });
           if (Object.keys(out).length) { await store.put(org, 'cls', 'b-' + Date.now() + '-' + i, { at: new Date().toISOString(), by: 'sistema', items: out }, 'sistema'); wrote++; }
         }
-        if (!wrote) throw new Error('La IA no pudo clasificar los productos. Intenta de nuevo en unos minutos.');
+        await save({ misses });
+        if (!wrote && !done) throw new Error('La IA no pudo clasificar los productos (puede estar saturada). Intenta de nuevo en unos minutos.');
       }
       const cfg = await store.get(org, 'ws', 'config');
       await store.put(org, 'ws', 'config', { ...cfg, setupDone: true }, 'sistema');

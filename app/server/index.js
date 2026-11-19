@@ -272,14 +272,32 @@ app.post('/api/quick/:org/pump', auth, orgAccess(1), wrap(async (req, res) => {
 app.post('/api/quick/:org/comps', auth, orgAccess(1), wrap(async (req, res) => {
   const k = (await q('select kind from orgs where id = $1', [req.params.org])).rows[0];
   if (!k || k.kind !== 'quick') throw fail(400, 'invalid', 'No es un análisis rápido.');
-  const urls = [...new Set((Array.isArray(req.body.urls) ? req.body.urls : []).map((u) => TPI.ingest.origin(String(u || ''))).filter(Boolean))].slice(0, 6);
+  // Se conserva la ruta de país (zara.com/co) y se aceptan hasta 12 competidores.
+  const full = (u) => { u = String(u || '').trim(); if (!TPI.ingest.origin(u)) return null; const x = new URL(/^https?:/i.test(u) ? u : 'https://' + u); return x.origin + (x.pathname.length > 1 ? x.pathname.replace(/\/$/, '') : ''); };
+  const urls = [...new Set((Array.isArray(req.body.urls) ? req.body.urls : []).map(full).filter(Boolean))].slice(0, 16);
   if (!urls.length) throw fail(400, 'invalid_url', 'Escribe al menos un link válido, por ejemplo marca.com');
   const j = (await q("select id, progress from jobs where org_id = $1 and type = 'quick' order by created_at desc limit 1", [req.params.org])).rows[0];
   if (!j) throw fail(404, 'not_found', 'No hay análisis.');
   const p = j.progress || {};
   const tried = (p.tried || []).filter((u) => !urls.includes(u));
-  const named = Object.fromEntries((p.candidates || []).map((c) => [TPI.ingest.origin(c.url), c.name]));
+  const named = Object.fromEntries((p.candidates || []).map((c) => [full(c.url), c.name]));
   await q("update jobs set status = 'queued', error = null, lease_until = null, updated_at = now(), progress = $2 where id = $1", [j.id, { ...p, phase: 'comps', manual: true, tried, candidates: urls.map((u) => ({ name: named[u] || TPI.ingest.hostOf(u), url: u })) }]);
+  res.json({ ok: true });
+}));
+// El usuario elige el sitio de su país (o corrige la dirección) y el análisis vuelve a leer la tienda propia, sin consumir otro análisis.
+app.post('/api/quick/:org/own', auth, orgAccess(1), wrap(async (req, res) => {
+  const k = (await q('select kind from orgs where id = $1', [req.params.org])).rows[0];
+  if (!k || k.kind !== 'quick') throw fail(400, 'invalid', 'No es un análisis rápido.');
+  let url = String(req.body.url || '').trim();
+  const origin = TPI.ingest.origin(url);
+  if (!origin) throw fail(400, 'invalid_url', 'Escribe una dirección válida, por ejemplo mitienda.com');
+  if (!/^https?:/i.test(url)) url = 'https://' + url;
+  const j = (await q("select id, progress from jobs where org_id = $1 and type = 'quick' order by created_at desc limit 1", [req.params.org])).rows[0];
+  if (!j || (j.progress || {}).phase !== 'need_own') throw fail(400, 'invalid', 'El análisis no está esperando la tienda.');
+  const s = await store.get(req.params.org, 'stores', 'own');
+  await store.put(req.params.org, 'stores', 'own', { ...s, url, name: TPI.ingest.hostOf(origin) }, 'sistema');
+  await q("update orgs set name = $2, meta = meta || $3 where id = $1", [req.params.org, TPI.ingest.hostOf(origin), { url: origin }]);
+  await q("update jobs set status = 'queued', error = null, lease_until = null, updated_at = now(), progress = '{}'::jsonb where id = $1", [j.id]);
   res.json({ ok: true });
 }));
 // Catálogo propio subido por el usuario (CSV o Excel ya interpretados en el navegador) cuando la tienda no se puede leer.

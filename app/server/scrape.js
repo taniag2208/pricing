@@ -8,7 +8,7 @@ const MAX_PAGES = Number(process.env.CRAWLER_MAX_PAGES || 40);
 
 async function get(url, accept, ms) {
   const r = await fetch(url, { headers: { 'User-Agent': UA, Accept: accept || 'application/json', 'Accept-Language': 'es-CO,es;q=0.9' }, redirect: 'follow', signal: AbortSignal.timeout(ms || 25000) });
-  return { ok: r.ok, status: r.status, text: await r.text() };
+  return { ok: r.ok, status: r.status, url: r.url, text: await r.text() };
 }
 
 async function robots(origin) {
@@ -86,14 +86,14 @@ function metaProduct(html, url) {
 const SKIP = /cuenta|account|login|registro|carrito|cart|checkout|blog|ayuda|help|contact|politica|policy|terminos|terms|faq|nosotros|about|tiendas|stores|garantia|devoluc|envios|pqr|trabaja|wishlist|favorit|search|buscar|\.(jpg|png|pdf)$/i;
 async function crawlText(origin, allowed, opts) {
   if (!opts.ai) return null;
-  let home; try { home = await get(origin + '/', 'text/html', 15000); } catch (e) { return null; }
+  let home; try { home = await get(origin + (opts.prefix || '') + '/', 'text/html', 15000); } catch (e) { return null; }
   if (!home.ok) return null;
   const links = [];
   const re = /<a[^>]+href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi; let m;
   while ((m = re.exec(home.text)) && links.length < 400) {
     let u; try { u = new URL(m[1], origin); } catch (e) { continue; }
     const txt = m[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-    if (u.origin !== origin || SKIP.test(u.pathname) || u.pathname === '/' || u.pathname.split('/').filter(Boolean).length > 3 || !txt || txt.length > 40) continue;
+    if (u.origin !== origin || (opts.prefix && !u.pathname.toLowerCase().startsWith(opts.prefix)) || SKIP.test(u.pathname) || u.pathname === '/' || u.pathname.split('/').filter(Boolean).length > 3 || !txt || txt.length > 40) continue;
     if (!allowed(u.pathname + u.search) || links.some((l) => l.url === u.href)) continue;
     links.push({ url: u.href, txt });
   }
@@ -111,7 +111,7 @@ async function crawlText(origin, allowed, opts) {
   return items.length >= 5 ? { platform: 'Texto de la página (extraído con IA)', origin, items, pages: items.length } : null;
 }
 
-async function sitemapUrls(origin, allowed, want) {
+async function sitemapUrls(origin, allowed, want, prefix) {
   const seen = new Set(), maps = [];
   try { const r = await get(origin + '/robots.txt', 'text/plain', 12000); (r.text.match(/^\s*sitemap:\s*(\S+)/gim) || []).forEach((l) => maps.push(l.split(/:\s*/).slice(1).join(':').trim())); } catch (e) { /* sin robots */ }
   maps.push(origin + '/sitemap.xml', origin + '/sitemap_index.xml');
@@ -126,12 +126,12 @@ async function sitemapUrls(origin, allowed, want) {
       [...prodFirst, ...locs.filter((u) => !prodFirst.includes(u) && !/brand|marca|categor|collection|blog|page|post|custom/i.test(u))].forEach((u) => maps.push(u));
     } else locs.forEach((u) => urls.push(u));
   }
-  return urls.filter((u) => { try { const x = new URL(u); return x.origin.replace('://www.', '://') === origin.replace('://www.', '://') && allowed(x.pathname + x.search) && /\/p$|\/p\/|\/products?\/|\/producto|\.html$|-\d+$|\/item\//i.test(x.pathname); } catch (e) { return false; } });
+  return urls.filter((u) => { try { const x = new URL(u); return x.origin.replace('://www.', '://') === origin.replace('://www.', '://') && allowed(x.pathname + x.search) && (!prefix || x.pathname.toLowerCase().startsWith(prefix)) && /\/p$|\/p\/|\/products?\/|\/producto|\.html$|-\d+$|\/item\//i.test(x.pathname); } catch (e) { return false; } });
 }
 
 async function crawlSitemap(origin, allowed, opts, onProgress) {
   const want = opts.sitemapMax || 60;
-  let urls = await sitemapUrls(origin, allowed, want);
+  let urls = await sitemapUrls(origin, allowed, want, opts.prefix);
   if (!urls.length) return null;
   const keep = relevant(opts.keywords);
   const rel = urls.filter((u) => keep(decodeURIComponent(u).replace(/[-_/]/g, ' ')));
@@ -196,13 +196,44 @@ async function crawlOrigin(origin, onProgress, opts) {
 }
 
 // Intenta el dominio tal cual y su variante con o sin www.
+// Página de inicio: sigue redirecciones (studiof.com → studiof.com.co) y lee el idioma declarado.
+async function homeInfo(origin) {
+  try {
+    const r = await get(origin + '/', 'text/html', 12000);
+    const fin = new URL(r.url || origin + '/');
+    const lang = ((r.text.match(/<html[^>]*\slang=["']?([a-zA-Z-]+)/i) || [])[1] || '').toLowerCase();
+    // Página para elegir país (p. ej. studiof.com): se ofrecen los sitios de cada país en vez de buscar un catálogo que no existe.
+    let countries = null;
+    const plain = r.text.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+    if (/en qu[eé] pa[ií]s|selecciona tu (pa[ií]s|ubicaci)|elige tu pa[ií]s|choose your (country|location)|select your (country|region)/i.test(plain)) {
+      const re = /<a[^>]+href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi; let m; const seen = new Set(); countries = [];
+      while ((m = re.exec(r.text))) {
+        const label = m[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        if (!/colombia|m[eé]xico|chile|per[uú]|panam[aá]|ecuador|argentina|costa rica|guatemala|usa|estados unidos|españa|espana/i.test(label) || label.length > 30) continue;
+        let u; try { u = new URL(m[1], fin.href); } catch (e) { continue; }
+        if (seen.has(u.href)) continue; seen.add(u.href);
+        countries.push({ label, url: u.origin + (u.pathname.length > 1 ? u.pathname.replace(/\/$/, '') : '') });
+      }
+      if (!countries.length) countries = null;
+    }
+    return { origin: fin.origin, path: fin.pathname, lang, status: r.status, countries };
+  } catch (e) { return null; }
+}
+
+// Intenta el dominio al que redirige la página de inicio y, si falla, la variante con o sin www.
 async function crawl(storeUrl, onProgress, opts = {}) {
-  const origin = TP.ingest.origin(storeUrl);
+  let origin = TP.ingest.origin(storeUrl);
   if (!origin) throw new Error('URL inválida');
+  // Sitios con ruta por país (zara.com/co/, ikea.com/co/es/): solo se leen las páginas de esa ruta.
+  try { const m = new URL(/^https?:/i.test(storeUrl) ? storeUrl : 'https://' + storeUrl).pathname.match(/^\/([a-z]{2})(\/(es|es-[a-z]{2}))?(\/|$)/i); if (m) opts = { ...opts, prefix: '/' + m[1].toLowerCase() + (m[2] || '') }; } catch (e) { /* sin ruta */ }
+  const home = await homeInfo(origin);
+  if (home && home.countries) { const e = new Error('La dirección es una página para elegir país.'); e.code = 'no_catalog'; e.reason = 'country_selector'; e.countries = home.countries; e.home = home; e.origin = origin; throw e; }
+  if (home && home.origin !== origin && home.origin.replace('://www.', '://') !== origin.replace('://www.', '://')) origin = home.origin;
   const u = new URL(origin);
   const alt = u.protocol + '//' + (u.hostname.startsWith('www.') ? u.hostname.slice(4) : 'www.' + u.hostname) + (u.port ? ':' + u.port : '');
-  try { return await crawlOrigin(origin, onProgress, opts); }
-  catch (e) { if (e.code !== 'unreachable' && e.code !== 'no_catalog') throw e; try { return await crawlOrigin(alt, onProgress, opts); } catch (e2) { throw e.code === 'unreachable' && e2.code === 'no_catalog' ? e2 : e; } }
+  const done = (res) => Object.assign(res, { home });
+  try { return done(await crawlOrigin(origin, onProgress, opts)); }
+  catch (e) { if (e.code !== 'unreachable' && e.code !== 'no_catalog') throw e; try { return done(await crawlOrigin(alt, onProgress, opts)); } catch (e2) { const f = e.code === 'unreachable' && e2.code === 'no_catalog' ? e2 : e; f.home = home; f.origin = origin; throw f; } }
 }
 
 module.exports = { crawl, robots, UA, ldProduct, metaProduct };
